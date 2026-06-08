@@ -29,12 +29,14 @@ import struct
 import base64
 import tempfile
 import threading
+import time
+import psutil
 from dotenv import load_dotenv
 from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts
 
 # ─── CONFIG ──────────────────────────────────────────
 HOST = "0.0.0.0"       # Listen on all interfaces
-PORT = 9090             # UDP port
+PORT = 5060             # UDP port
 CHUNK_SIZE = 4096       # Max audio bytes per UDP packet
 SAMPLE_RATE = 16000     # Expected sample rate from client
 CHANNELS = 1            # Mono audio
@@ -80,6 +82,7 @@ def save_chunks_to_wav(chunks, filepath):
 
 def process_call(sock, caller_addr, audio_chunks):
     """Process a complete call: STT → Gemini → TTS → send response back."""
+    start_time = time.time()
     caller_id = f"{caller_addr[0]}:{caller_addr[1]}"
     print(f"\n[CALL] Processing call from {caller_id} ({len(audio_chunks)} chunks received)")
     
@@ -148,6 +151,20 @@ def process_call(sock, caller_addr, audio_chunks):
         # Signal end of response
         sock.sendto(b"RESP_DONE", caller_addr)
         print(f"[CALL] Call complete for {caller_id}")
+        
+        # ── STEP 6: Server Metrics ──
+        end_time = time.time()
+        latency = round(end_time - start_time, 2)
+        # Call cpu_percent() without blocking to get current instantaneous usage
+        cpu_usage = psutil.cpu_percent(interval=None)
+        ram_usage = psutil.virtual_memory().percent
+        
+        print("\n" + "─" * 50)
+        print(f"📊 SERVER METRICS FOR CALL: {caller_id}")
+        print(f"   ⏱️  Pipeline Latency: {latency} seconds")
+        print(f"   🧠 Server CPU Usage:   {cpu_usage}%")
+        print(f"   💾 Server RAM Usage:   {ram_usage}%")
+        print("─" * 50 + "\n")
         
     except Exception as e:
         print(f"[ERROR] Processing failed: {e}")

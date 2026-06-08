@@ -31,7 +31,7 @@ import struct
 
 # ─── CONFIG ──────────────────────────────────────────
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 9090
+DEFAULT_PORT = 5060
 CHUNK_SIZE = 4096
 RECORD_SECONDS = 7         # Max recording duration
 SAMPLE_RATE = 16000
@@ -207,10 +207,12 @@ def main():
     print(f"  Server: {args.host}:{args.port}")
     print("=" * 60)
     
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
     try:
         while True:
+            # Create a fresh socket for every call to prevent reading stale packets
+            # from previous calls (which causes audio mixing if packets arrived late!)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
             print("\n" + "=" * 60)
             print("  [1] Record from microphone and send")
             print("  [2] Send a WAV file")
@@ -233,6 +235,7 @@ def main():
                 filepath = args.file or input("  Enter WAV file path: ").strip()
                 if not os.path.exists(filepath):
                     print(f"  [ERROR] File not found: {filepath}")
+                    sock.close()
                     continue
                 send_audio_over_udp(sock, server_addr, filepath)
                 text_resp, audio_data = receive_response(sock)
@@ -241,14 +244,15 @@ def main():
                     
             elif choice == "3":
                 print("\n👋  Goodbye!")
+                sock.close()
                 break
             else:
                 print("  Invalid choice.")
+            
+            sock.close()
                 
     except KeyboardInterrupt:
         print("\n\n👋  Goodbye!")
-    finally:
-        sock.close()
 
 
 if __name__ == "__main__":
