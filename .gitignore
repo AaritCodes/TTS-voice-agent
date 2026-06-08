@@ -1,0 +1,32 @@
+# ─── Secrets ───
+.env
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ─── Temp files ───
+*.wav
+*.mp3
+temp_recording.*
+udp_response.*
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS ───
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ─── Docs generator (optional, remove if you want it on GitHub) ───
+generate_docs.py
+Voice_Assistant_Documentation.docx

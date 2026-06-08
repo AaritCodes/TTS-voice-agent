@@ -1,0 +1,12 @@
+{
+  "faq": [
+    {
+      "question": "What is VAPT?",
+      "answer": "VAPT stands for Vulnerability Assessment and Penetration Testing."
+    },
+    {
+      "question": "What is phishing?",
+      "answer": "Phishing is a type of social engineering where an attacker sends a fraudulent message designed to trick a person into revealing sensitive information."
+    }
+  ]
+}

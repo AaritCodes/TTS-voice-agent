@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glass-container">
+        <header>
+            <h1>AI Assistant</h1>
+            <p>Multilingual Voice Intelligence</p>
+        </header>
+
+        <main id="chat-container">
+            <div class="message assistant-msg">
+                <p>Hello! Click the microphone to start speaking.</p>
+            </div>
+        </main>
+
+        <div class="controls">
+            <button id="mic-btn" class="mic-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+            </button>
+            <div id="status-text" class="status-text">Ready</div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

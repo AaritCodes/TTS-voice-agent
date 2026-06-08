@@ -1,0 +1,10 @@
+google-generativeai
+requests
+sounddevice
+soundfile
+numpy
+python-dotenv
+SpeechRecognition
+fastapi
+uvicorn
+python-multipart
