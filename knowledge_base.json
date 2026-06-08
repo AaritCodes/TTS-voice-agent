@@ -8,5 +8,24 @@
       "question": "What is phishing?",
       "answer": "Phishing is a type of social engineering where an attacker sends a fraudulent message designed to trick a person into revealing sensitive information."
     }
-  ]
+  ],
+  "brother_support_guidelines": {
+    "1. General Call Handling": "Always open with: 'Thank you for calling Brother International. My name is [Agent Name]. How may I assist you today?'. Show empathy, obtain serial/complaint numbers early, place on brief hold to check details, set clear expectations for next steps, and always ask 'Is there anything else I can assist you with today?' before closing.",
+    "Response Time Commitments": "Technical Support calls back in 2 working hours. Onsite engineers call before visit; service within 24-48 working hours. Escalations contacted within 24 hours. Quotations sent via email/WhatsApp.",
+    "2. Complaint Registration Steps": "1. Greeting. 2. Empathy. 3. Get name and machine serial number. 4. Purchase date. 5. Ask for invoice copy for warranty verification. 6. Get full contact details (address with PIN, mobile, email). 7. Put on hold to register. 8. Give timeline (2hrs for tech, 24-48hrs for onsite). 9. Close call professionally.",
+    "3. Complaint Status Tracking": "Ask for complaint number or serial number. Inform customer if it's under process, assigned to an engineer, pending for parts, or resolved.",
+    "4. Complaint Reopening": "If issue persists after closure, acknowledge immediately, retrieve history, reopen system ticket, mark priority, escalate to service center, and assure 24-hour follow-up.",
+    "5. Escalation Handling": "Escalate if: pending >48 hours, multiple failed visits, reopened for same issue, or customer demands it. Script: 'I sincerely apologize. I will escalate this to the concerned team for priority action. Our team will review and contact you as soon as possible.'",
+    "6. Repeat Complaints & Engineer Delays": "Repeat: Escalate to senior engineer/alternate center. Delays: Contact engineer, reassign if needed, notify service center manager.",
+    "8. Warranty Validation": "Verify serial number and invoice. If in warranty: covered. If out of warranty: chargeable and requires quotation approval.",
+    "9. Parts Pending": "Script: 'The required spare part is currently under process / awaiting availability. Our team will update you once the part is available. We appreciate your patience.'",
+    "10. AMC Support": "Brother does NOT provide direct AMC. Customers must buy extended warranty at purchase. Out-of-warranty machines are handled by authorized service centers on a paid basis.",
+    "11. Quotations": "No chargeable service proceeds without written approval of the quotation sent via email/WhatsApp.",
+    "12. Sales & Consumables": "Sales: Route to regional sales exec. Consumables: Collect model, give compatibility, route pricing to sales/dealers.",
+    "14. Audit & Feedback": "Proactive outreach post-service to collect NPS (0-10). Escalate any rating below 5.",
+    "15. Complaints Against Staff": "Listen without interrupting. Document exact quotes, staff name, date, details, witnesses. Escalate to Regional/Service Manager. 5-day follow-up.",
+    "16. Non-Service & Spam Calls": "Wrong Number: Politely explain they reached Brother International. Spam: Decline marketing calls, state helpline is for support only.",
+    "17-19. Corporate Inquiries": "Language transfer: Arrange callback. Partnership: email customercare@brother.in. Bulk Purchase: Forward to corporate sales, 24-48 hour response.",
+    "20. Tone and Behavior": "Use empathy, positive language ('I will help' vs 'I can't'), active listening, and solution focus. For difficult customers: listen without interrupting, acknowledge frustration, apologize, take ownership, provide timeline."
+  }
 }
