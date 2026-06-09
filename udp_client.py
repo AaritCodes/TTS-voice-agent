@@ -31,7 +31,7 @@ import struct
 
 # ─── CONFIG ──────────────────────────────────────────
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
+DEFAULT_PORT = 5060
 CHUNK_SIZE = 4096
 RECORD_SECONDS = 7         # Max recording duration
 SAMPLE_RATE = 16000
