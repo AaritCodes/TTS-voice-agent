@@ -36,7 +36,7 @@ from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tt
 
 # ─── CONFIG ──────────────────────────────────────────
 HOST = "0.0.0.0"       # Listen on all interfaces
-PORT = 8080             # UDP port
+PORT = 8000             # UDP port
 CHUNK_SIZE = 4096       # Max audio bytes per UDP packet
 SAMPLE_RATE = 16000     # Expected sample rate from client
 CHANNELS = 1            # Mono audio
