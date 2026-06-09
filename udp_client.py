@@ -126,6 +126,7 @@ def receive_response(sock):
     
     text_response = None
     audio_chunks = []
+    total_chunks = None
     
     while True:
         try:
@@ -151,13 +152,22 @@ def receive_response(sock):
                     seq = int(parts[1])
                     audio_data = parts[2]
                     audio_chunks.append((seq, audio_data))
+                if total_chunks is not None and len(audio_chunks) >= total_chunks:
+                    print(f"\n✅  Response complete! Received {len(audio_chunks)} audio chunks.")
+                    break
             
-            elif data == b"RESP_DONE":
-                print(f"\n✅  Response complete! Received {len(audio_chunks)} audio chunks.")
-                break
+            elif data.startswith(b"RESP_DONE"):
+                parts = data.split(b":")
+                total_chunks = int(parts[1]) if len(parts) > 1 else 0
+                if len(audio_chunks) >= total_chunks:
+                    print(f"\n✅  Response complete! Received {len(audio_chunks)} audio chunks.")
+                    break
                 
         except socket.timeout:
-            print("[TIMEOUT] No response from server within 30 seconds.")
+            if audio_chunks:
+                print(f"\n✅  Timeout reached, but received {len(audio_chunks)} chunks.")
+            else:
+                print("[TIMEOUT] No response from server within 30 seconds.")
             break
     
     # Reassemble audio

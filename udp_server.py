@@ -106,7 +106,7 @@ def process_call(sock, caller_addr, audio_chunks):
         if not transcript:
             error_msg = json.dumps({"error": "Could not understand audio"})
             sock.sendto(b"TEXT:" + error_msg.encode(), caller_addr)
-            sock.sendto(b"RESP_DONE", caller_addr)
+            sock.sendto(b"RESP_DONE:0", caller_addr)
             return
         
         print(f"[CALL] User said: '{transcript}' (Language: {lang_code})")
@@ -149,7 +149,7 @@ def process_call(sock, caller_addr, audio_chunks):
             print(f"[CALL] TTS failed")
         
         # Signal end of response
-        sock.sendto(b"RESP_DONE", caller_addr)
+        sock.sendto(f"RESP_DONE:{seq}".encode(), caller_addr)
         print(f"[CALL] Call complete for {caller_id}")
         
         # ── STEP 6: Server Metrics ──
@@ -170,7 +170,7 @@ def process_call(sock, caller_addr, audio_chunks):
         print(f"[ERROR] Processing failed: {e}")
         error_msg = json.dumps({"error": str(e)})
         sock.sendto(b"TEXT:" + error_msg.encode(), caller_addr)
-        sock.sendto(b"RESP_DONE", caller_addr)
+        sock.sendto(b"RESP_DONE:0", caller_addr)
     finally:
         # Cleanup temp files
         for path in [input_path, output_path]:
