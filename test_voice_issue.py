@@ -143,7 +143,12 @@ def main():
     print("pyVoIP Audio Testing: Voice Note Injection & Recording")
     print("==================================================")
     
-    server_ip = "34.55.229.163"
+    # Use localhost if running on Linux/VM to bypass NAT/firewalls entirely
+    import sys
+    if sys.platform == "linux" or sys.platform == "linux2":
+        server_ip = "127.0.0.1"
+    else:
+        server_ip = "34.55.229.163"
     server_port = 5060
     destination = "100"
     
