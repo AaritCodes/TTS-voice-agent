@@ -33,7 +33,7 @@ async def recvall_async(reader, n):
 
 def get_rms(payload):
     """
-    Calculate the Root Mean Square (RMS) of a 16-bit signed PCM payload.
+    Calculate the Root Mean Square (RMS) of a 16-bit signed PCM payload (little-endian).
     Provides a PEP 594 compliant fallback when audioop is deprecated/removed (Python 3.13+).
     """
     if audioop is not None:
@@ -45,14 +45,14 @@ def get_rms(payload):
     # Fast numpy-based fallback
     try:
         import numpy as np
-        samples = np.frombuffer(payload, dtype='>i2') # AudioSocket PCM is 16-bit big-endian
+        samples = np.frombuffer(payload, dtype='<i2') # Swapped to little-endian natively
         return int(np.sqrt(np.mean(samples.astype(np.float64)**2)))
     except Exception:
         # Pure Python fallback
         count = len(payload) // 2
         if count == 0:
             return 0
-        samples = struct.unpack(f">{count}h", payload)
+        samples = struct.unpack(f"<{count}h", payload)
         sum_squares = sum(s * s for s in samples)
         return int((sum_squares / count) ** 0.5)
 
@@ -154,6 +154,14 @@ async def process_call_async(reader, writer):
                 payload = await recvall_async(reader, length)
                 if not payload: break
                 
+                # Swap big-endian AudioSocket PCM to native little-endian (wave/audioop/STT standard)
+                if audioop is not None:
+                    payload = audioop.byteswap(payload, 2)
+                else:
+                    import numpy as np
+                    samples = np.frombuffer(payload, dtype='>i2')
+                    payload = samples.astype('<i2').tobytes()
+                
                 # Measure volume using our robust fallback wrapper
                 rms = get_rms(payload)
                 
@@ -232,9 +240,18 @@ async def process_call_async(reader, writer):
                                     # Stream in small 320-byte chunks to prevent buffering issues
                                     for i in range(0, len(raw_8k), 320):
                                         chunk = raw_8k[i:i+320]
-                                        out_header = struct.pack(">BH", 0x10, len(chunk))
+                                        
+                                        # Swap little-endian PCM chunk back to big-endian for AudioSocket
+                                        if audioop is not None:
+                                            chunk_be = audioop.byteswap(chunk, 2)
+                                        else:
+                                            import numpy as np
+                                            samples = np.frombuffer(chunk, dtype='<i2')
+                                            chunk_be = samples.astype('>i2').tobytes()
+                                            
+                                        out_header = struct.pack(">BH", 0x10, len(chunk_be))
                                         try:
-                                            writer.write(out_header + chunk)
+                                            writer.write(out_header + chunk_be)
                                             await writer.drain() # Wait for non-blocking socket buffer write
                                         except Exception as e:
                                             print(f"    [ERROR] Connection lost while streaming: {e}")
