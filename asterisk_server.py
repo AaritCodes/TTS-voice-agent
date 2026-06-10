@@ -110,6 +110,7 @@ async def process_call_async(reader, writer):
         
         frames = bytearray()
         silence_frames = 0
+        frame_count = 0
         is_recording = False
         is_streaming_response = False
         
@@ -156,9 +157,13 @@ async def process_call_async(reader, writer):
                 # Measure volume using our robust fallback wrapper
                 rms = get_rms(payload)
                 
+                frame_count += 1
+                if frame_count % 50 == 0:
+                    print(f"    [DEBUG] Frame {frame_count}: RMS={rms}, is_recording={is_recording}, silence_frames={silence_frames}")
+                
                 if rms > SILENCE_THRESHOLD_RMS:
                     if not is_recording:
-                        print("\n🗣️  Speech detected! Recording...")
+                        print(f"\n🗣️  Speech detected! (RMS={rms}) Recording...")
                     is_recording = True
                     silence_frames = 0
                 else:
