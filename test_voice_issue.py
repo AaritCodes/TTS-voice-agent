@@ -103,15 +103,18 @@ def convert_wav_to_pyvoip_format(wav_path):
     else:
         raise ValueError(f"Unsupported framerate: {framerate}")
 
-    # 2. Convert 16-bit (width 2) to 8-bit signed (width 1)
+    # 2. Convert 16-bit (width 2) to 8-bit unsigned (width 1)
     if audioop is not None:
-        raw_8k_8bit = audioop.lin2lin(raw_8k_16bit, 2, 1)
+        raw_8k_8bit_signed = audioop.lin2lin(raw_8k_16bit, 2, 1)
+        # Convert signed 8-bit PCM (where silence is 0) to unsigned 8-bit PCM (where silence is 128)
+        raw_8k_8bit = bytes((b + 128) & 0xFF for b in raw_8k_8bit_signed)
     else:
         # Numpy scaling fallback
         import numpy as np
         samples_16 = np.frombuffer(raw_8k_16bit, dtype='<i2')
         samples_8 = (samples_16 // 256).astype(np.int8)
-        raw_8k_8bit = samples_8.tobytes()
+        samples_8_unsigned = (samples_8.astype(np.int16) + 128).astype(np.uint8)
+        raw_8k_8bit = samples_8_unsigned.tobytes()
         
     print(f"  [SUCCESS] Converted to pyVoIP format: {len(raw_8k_8bit)} bytes (approx {len(raw_8k_8bit)/8000:.2f} seconds)")
     return raw_8k_8bit
@@ -122,13 +125,16 @@ def save_recorded_audio(recorded_data, output_path):
         print("  [WARNING] No recorded audio data to save.")
         return
         
+    # Convert unsigned 8-bit PCM back to signed 8-bit PCM before 16-bit conversion
     if audioop is not None:
-        raw_16bit = audioop.lin2lin(recorded_data, 1, 2)
+        recorded_signed = bytes((b - 128) & 0xFF for b in recorded_data)
+        raw_16bit = audioop.lin2lin(recorded_signed, 1, 2)
     else:
         # Numpy scaling fallback
         import numpy as np
-        samples_8 = np.frombuffer(recorded_data, dtype=np.int8)
-        samples_16 = (samples_8.astype(np.int16) * 256).astype('<i2')
+        samples_8 = np.frombuffer(recorded_data, dtype=np.uint8)
+        samples_8_signed = (samples_8.astype(np.int16) - 128).astype(np.int8)
+        samples_16 = (samples_8_signed.astype(np.int16) * 256).astype('<i2')
         raw_16bit = samples_16.tobytes()
         
     with wave.open(output_path, "wb") as wf:
@@ -235,7 +241,7 @@ def main():
                     
                 chunk = issue_pcm_bytes[i:i+chunk_size]
                 if len(chunk) < chunk_size:
-                    chunk = chunk + b"\x00" * (chunk_size - len(chunk))
+                    chunk = chunk + b"\x80" * (chunk_size - len(chunk))
                     
                 # Send frame
                 call.write_audio(chunk)
@@ -254,7 +260,7 @@ def main():
             print("\nListening for Asterisk/AI voice bot response (15 seconds)...")
             listen_start = time.time()
             last_active_time = time.time()
-            silent_chunk = b"\x00" * chunk_size
+            silent_chunk = b"\x80" * chunk_size
             
             active_packets = 0
             
@@ -273,8 +279,8 @@ def main():
                     recorded_audio_buffer.extend(incoming)
                     
                     # Check if the incoming packet is active audio (non-silent)
-                    # For signed 8-bit PCM, 0 is silence. For pyVoIP empty/missing RTP, 0x80 is returned.
-                    is_silent = all(b == 0 or b == 0x80 for b in incoming)
+                    # For unsigned 8-bit PCM, 128 (0x80) is silence.
+                    is_silent = all(b == 0x80 for b in incoming)
                     if not is_silent:
                         active_packets += 1
                         if active_packets % 10 == 0:
