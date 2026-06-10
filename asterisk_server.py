@@ -111,6 +111,27 @@ async def process_call_async(reader, writer):
         frames = bytearray()
         silence_frames = 0
         is_recording = False
+        is_streaming_response = False
+        
+        # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
+        async def keep_alive():
+            silence_payload = b"\x00" * 320
+            silence_header = struct.pack(">BH", 0x10, len(silence_payload))
+            silence_packet = silence_header + silence_payload
+            try:
+                while True:
+                    if writer.is_closing():
+                        break
+                    if not is_streaming_response:
+                        writer.write(silence_packet)
+                        await writer.drain()
+                    await asyncio.sleep(0.1) # comfort keep-alive every 100ms
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"    [keep_alive] Exception: {e}")
+
+        keep_alive_task = asyncio.create_task(keep_alive())
         
         SILENCE_THRESHOLD_RMS = 500  # Minimum energy to count as speech
         MAX_SILENCE_CHUNKS = 75      # 75 chunks of 20ms = 1.5 seconds of silence
@@ -194,25 +215,28 @@ async def process_call_async(reader, writer):
                             if tts_success:
                                 # 5. Downsample and Stream Back to Asterisk
                                 print("    Streaming AI response back to the phone call...")
-                                
-                                def read_and_downsample():
-                                    with wave.open(out_path, "rb") as wf:
-                                        raw_16k = wf.readframes(wf.getnframes())
-                                        return downsample_16k_to_8k(raw_16k)
-                                        
-                                raw_8k = await asyncio.to_thread(read_and_downsample)
-                                
-                                # Stream in small 320-byte chunks to prevent buffering issues
-                                for i in range(0, len(raw_8k), 320):
-                                    chunk = raw_8k[i:i+320]
-                                    out_header = struct.pack(">BH", 0x10, len(chunk))
-                                    try:
-                                        writer.write(out_header + chunk)
-                                        await writer.drain() # Wait for non-blocking socket buffer write
-                                    except Exception as e:
-                                        print(f"    [ERROR] Connection lost while streaming: {e}")
-                                        break
-                                    await asyncio.sleep(0.015) # Non-blocking cooperative delay
+                                is_streaming_response = True
+                                try:
+                                    def read_and_downsample():
+                                        with wave.open(out_path, "rb") as wf:
+                                            raw_16k = wf.readframes(wf.getnframes())
+                                            return downsample_16k_to_8k(raw_16k)
+                                            
+                                    raw_8k = await asyncio.to_thread(read_and_downsample)
+                                    
+                                    # Stream in small 320-byte chunks to prevent buffering issues
+                                    for i in range(0, len(raw_8k), 320):
+                                        chunk = raw_8k[i:i+320]
+                                        out_header = struct.pack(">BH", 0x10, len(chunk))
+                                        try:
+                                            writer.write(out_header + chunk)
+                                            await writer.drain() # Wait for non-blocking socket buffer write
+                                        except Exception as e:
+                                            print(f"    [ERROR] Connection lost while streaming: {e}")
+                                            break
+                                        await asyncio.sleep(0.015) # Non-blocking cooperative delay
+                                finally:
+                                    is_streaming_response = False
                         finally:
                             # Immediately remove temp outgoing file
                             if os.path.exists(out_path):
@@ -234,6 +258,13 @@ async def process_call_async(reader, writer):
     except Exception as e:
         print(f"    [ERROR] Exception in call processing: {e}")
     finally:
+        # Cancel the keep-alive background task
+        keep_alive_task.cancel()
+        try:
+            await keep_alive_task
+        except Exception:
+            pass
+            
         # Guarantee connection shutdown and cleanup
         try:
             writer.close()
