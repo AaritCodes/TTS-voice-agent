@@ -167,7 +167,7 @@ async def process_call_async(reader, writer):
                 
                 frame_count += 1
                 if frame_count % 50 == 0:
-                    print(f"    [DEBUG] Frame {frame_count}: RMS={rms}, is_recording={is_recording}, silence_frames={silence_frames}")
+                    print(f"    [DEBUG] Frame {frame_count}: RMS={rms}, is_recording={is_recording}, silence_frames={silence_frames}, hex={payload[:20].hex()}")
                 
                 if rms > SILENCE_THRESHOLD_RMS:
                     if not is_recording:
