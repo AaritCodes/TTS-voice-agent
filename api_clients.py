@@ -13,9 +13,10 @@ def get_gemini_response(prompt_text, chat_history, language_code, kb_context):
         
         system_prompt = f"""You are a helpful multilingual voice assistant.
 Rules:
-1. Answer concisely and naturally for voice conversations.
-2. The user's detected language code is: {language_code}. You MUST respond in this language.
-3. Use the following knowledge base if relevant, but feel free to use your general knowledge to answer any other questions:
+1. Answer concisely and naturally for voice conversations. Keep your reply extremely short (1-2 sentences, maximum 300 characters).
+2. CRITICAL: Your response MUST be under 400 characters to fit TTS engine constraints.
+3. The user's detected language code is: {language_code}. You MUST respond in this language.
+4. Use the following knowledge base if relevant, but feel free to use your general knowledge to answer any other questions:
 {json.dumps(kb_context, indent=2, ensure_ascii=False)}
 """
         
@@ -60,6 +61,10 @@ def sarvam_stt(audio_file_path):
         return "", "en-IN"
 
 def sarvam_tts(text, language_code, output_file_path):
+    # Enforce a strict 490 character truncation safeguard to satisfy Sarvam TTS limit (max 500 characters)
+    if len(text) > 490:
+        text = text[:487] + "..."
+        
     url = "https://api.sarvam.ai/text-to-speech"
     headers = {
         "api-subscription-key": os.getenv("SARVAM_API_KEY"),
