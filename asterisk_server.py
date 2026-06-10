@@ -6,6 +6,10 @@ import os
 import uuid
 import tempfile
 import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables (API keys)
+load_dotenv()
 
 try:
     import audioop
