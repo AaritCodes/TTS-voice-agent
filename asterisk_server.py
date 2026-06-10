@@ -2,11 +2,10 @@ import socket
 import struct
 import wave
 import json
-import time
 import os
-import threading
 import uuid
 import tempfile
+import asyncio
 
 try:
     import audioop
@@ -22,17 +21,15 @@ setup_gemini()
 HOST = '127.0.0.1'
 PORT = 9090
 
-def recvall(sock, n):
-    data = bytearray()
-    while len(data) < n:
-        try:
-            packet = sock.recv(n - len(data))
-            if not packet:
-                return None
-            data.extend(packet)
-        except Exception:
-            return None
-    return data
+async def recvall_async(reader, n):
+    """
+    Asynchronously and safely read exactly n bytes from the stream reader.
+    """
+    try:
+        data = await reader.readexactly(n)
+        return data
+    except Exception:
+        return None
 
 def get_rms(payload):
     """
@@ -84,23 +81,29 @@ def downsample_16k_to_8k(raw_16k):
         out[1::2] = raw_16k[1::4]
         return bytes(out)
 
-def process_call(conn, addr):
+async def process_call_async(reader, writer):
+    """
+    Asynchronous connection handler for Asterisk AudioSocket connections.
+    Uses cooperative task scheduling, eliminating heavy thread structures.
+    """
+    addr = writer.get_extra_info('peername')
     print(f"==========================================")
-    print(f"📞  Asterisk AudioSocket Connected: {addr}")
+    print(f"📞  Asterisk AudioSocket Connected (Async): {addr}")
     print(f"==========================================")
     
-    # Generate unique paths for session WAV files to prevent multi-threaded data collisions/overwrites
+    # Generate unique paths for session WAV files to prevent data collisions/overwrites
     session_id = str(uuid.uuid4())
     wav_path = os.path.join(tempfile.gettempdir(), f"incoming_{session_id}.wav")
     out_path = os.path.join(tempfile.gettempdir(), f"outgoing_{session_id}.wav")
     
     try:
         # Read the initial UUID packet (type 0x01)
-        header = recvall(conn, 3)
+        header = await recvall_async(reader, 3)
         if not header: return
         kind, length = struct.unpack(">BH", header)
         if kind == 0x01:
-            call_id_bytes = recvall(conn, length)
+            call_id_bytes = await recvall_async(reader, length)
+            if not call_id_bytes: return
             # Asterisk sends 16-byte UUID
             call_id = call_id_bytes.hex()
             print(f"    Call ID: {call_id}")
@@ -115,7 +118,7 @@ def process_call(conn, addr):
         print("\n🎧  Listening for audio...")
         
         while True:
-            header = recvall(conn, 3)
+            header = await recvall_async(reader, 3)
             if not header: break
             
             kind, length = struct.unpack(">BH", header)
@@ -126,7 +129,7 @@ def process_call(conn, addr):
                 
             elif kind == 0x10:
                 # Incoming Audio
-                payload = recvall(conn, length)
+                payload = await recvall_async(reader, length)
                 if not payload: break
                 
                 # Measure volume using our robust fallback wrapper
@@ -149,15 +152,18 @@ def process_call(conn, addr):
                     print(f"    Silence detected. Processing {len(frames)} bytes of audio...")
                     
                     try:
-                        # 1. Save to unique WAV (8kHz, 16-bit, Mono)
-                        with wave.open(wav_path, "wb") as wf:
-                            wf.setnchannels(1)
-                            wf.setsampwidth(2)
-                            wf.setframerate(8000)
-                            wf.writeframes(frames)
+                        # 1. Save to unique WAV (8kHz, 16-bit, Mono) inside an executor thread
+                        def save_wav():
+                            with wave.open(wav_path, "wb") as wf:
+                                wf.setnchannels(1)
+                                wf.setsampwidth(2)
+                                wf.setframerate(8000)
+                                wf.writeframes(frames)
+                                
+                        await asyncio.to_thread(save_wav)
                         
-                        # 2. STT via Sarvam
-                        transcript, lang_code = sarvam_stt(wav_path)
+                        # 2. STT via Sarvam (blocking network operation offloaded to thread)
+                        transcript, lang_code = await asyncio.to_thread(sarvam_stt, wav_path)
                     finally:
                         # Immediately remove temp incoming file
                         if os.path.exists(wav_path):
@@ -170,39 +176,43 @@ def process_call(conn, addr):
                     print(f"📝  User: {transcript}")
                     
                     if transcript:
-                        # 3. LLM via Gemini
+                        # 3. LLM via Gemini (blocking network operation offloaded to thread)
                         kb_path = "knowledge_base.json"
                         kb = {}
                         if os.path.exists(kb_path):
                             with open(kb_path, "r") as f:
                                 kb = json.load(f)
                                 
-                        answer = get_gemini_response(transcript, [], lang_code, kb)
+                        answer = await asyncio.to_thread(get_gemini_response, transcript, [], lang_code, kb)
                         print(f"🤖  AI:   {answer}")
                         print("─" * 50)
                         
-                        # 4. TTS via Sarvam
+                        # 4. TTS via Sarvam (blocking network operation offloaded to thread)
                         print("    Generating speech...")
                         try:
-                            if sarvam_tts(answer, lang_code, out_path):
+                            tts_success = await asyncio.to_thread(sarvam_tts, answer, lang_code, out_path)
+                            if tts_success:
                                 # 5. Downsample and Stream Back to Asterisk
                                 print("    Streaming AI response back to the phone call...")
-                                with wave.open(out_path, "rb") as wf:
-                                    raw_16k = wf.readframes(wf.getnframes())
-                                    
-                                    # Downsample from 16kHz to 8kHz with our robust fallback Downsampler
-                                    raw_8k = downsample_16k_to_8k(raw_16k)
-                                    
-                                    # Stream in small 320-byte chunks to prevent buffering issues
-                                    for i in range(0, len(raw_8k), 320):
-                                        chunk = raw_8k[i:i+320]
-                                        out_header = struct.pack(">BH", 0x10, len(chunk))
-                                        try:
-                                            conn.sendall(out_header + chunk)
-                                        except Exception as e:
-                                            print(f"    [ERROR] Connection lost while streaming: {e}")
-                                            break
-                                        time.sleep(0.015) # Pace the audio slightly to match real-time
+                                
+                                def read_and_downsample():
+                                    with wave.open(out_path, "rb") as wf:
+                                        raw_16k = wf.readframes(wf.getnframes())
+                                        return downsample_16k_to_8k(raw_16k)
+                                        
+                                raw_8k = await asyncio.to_thread(read_and_downsample)
+                                
+                                # Stream in small 320-byte chunks to prevent buffering issues
+                                for i in range(0, len(raw_8k), 320):
+                                    chunk = raw_8k[i:i+320]
+                                    out_header = struct.pack(">BH", 0x10, len(chunk))
+                                    try:
+                                        writer.write(out_header + chunk)
+                                        await writer.drain() # Wait for non-blocking socket buffer write
+                                    except Exception as e:
+                                        print(f"    [ERROR] Connection lost while streaming: {e}")
+                                        break
+                                    await asyncio.sleep(0.015) # Non-blocking cooperative delay
                         finally:
                             # Immediately remove temp outgoing file
                             if os.path.exists(out_path):
@@ -218,36 +228,30 @@ def process_call(conn, addr):
                     silence_frames = 0
                     
             elif kind == 0xff:
-                print(f"\n❌  Asterisk Error Code: {recvall(conn, length)}")
+                err_payload = await recvall_async(reader, length)
+                print(f"\n❌  Asterisk Error Code: {err_payload}")
                 break
     except Exception as e:
         print(f"    [ERROR] Exception in call processing: {e}")
     finally:
-        # Guarantee resource cleanup and socket closure
+        # Guarantee connection shutdown and cleanup
         try:
-            conn.close()
+            writer.close()
+            await writer.wait_closed()
         except Exception:
             pass
         print(f"🔌  Connection closed for {addr}")
 
-def main():
-    print(f"Starting Asterisk AudioSocket Server on {HOST}:{PORT}")
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(10) # Backlog up to 10 connections
+async def main():
+    print(f"Starting Asterisk AudioSocket Server (Asyncio) on {HOST}:{PORT}")
+    # Start the async TCP server
+    server = await asyncio.start_server(process_call_async, HOST, PORT)
     
-    try:
-        while True:
-            conn, addr = server.accept()
-            # Handle each connection in a separate thread for full concurrent calling
-            client_thread = threading.Thread(target=process_call, args=(conn, addr))
-            client_thread.daemon = True
-            client_thread.start()
-    except KeyboardInterrupt:
-        print("\nShutting down server.")
-    finally:
-        server.close()
+    async with server:
+        await server.serve_forever()
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nShutting down server.")
