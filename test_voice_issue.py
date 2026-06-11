@@ -1,6 +1,14 @@
 import time
 import sys
 import os
+import io
+
+# Reconfigure stdout/stderr to UTF-8 with backslash/replace handling to prevent UnicodeEncodeErrors on Windows
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import wave
 import socket
 import struct
