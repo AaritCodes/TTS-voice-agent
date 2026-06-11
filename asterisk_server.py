@@ -124,17 +124,16 @@ async def process_call_async(reader, writer):
         
         # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
         async def keep_alive():
+            # Generate a 200Hz soft hum (amplitude 400 = RMS ~280) to bypass strict carrier VADs (like NeoX PBX)
+            # 160 samples of 16-bit PCM at 8000Hz = 20ms of audio (320 bytes)
+            import math
+            hum_samples = [int(400 * math.sin(2 * math.pi * 200 * (i / 8000.0))) for i in range(160)]
+            comfort_packet = struct.pack(">BH", 0x10, len(hum_samples) * 2) + struct.pack("<160h", *hum_samples)
+            
             try:
                 while True:
                     if writer.is_closing():
                         break
-                    
-                    # Generate low-amplitude comfort noise (160 samples of 16-bit signed PCM)
-                    # to keep any SIP trunk/gateway RTP VAD (Voice Activity Detection) alive
-                    samples = [random.randint(-1500, 1500) for _ in range(160)]
-                    comfort_payload = struct.pack("<160h", *samples)
-                    comfort_header = struct.pack(">BH", 0x10, len(comfort_payload))
-                    comfort_packet = comfort_header + comfort_payload
                     
                     async with write_lock:
                         if not is_streaming_response:
