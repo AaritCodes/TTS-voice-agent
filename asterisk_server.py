@@ -236,10 +236,10 @@ async def process_call_async(reader, writer):
         
         # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
         async def keep_alive():
-            # Generate low-amplitude white noise (RMS ~800) to keep the NeoX PBX Voice Activity Detection alive.
-            # We use white noise instead of a 200Hz hum because telecom gateways physically filter out all frequencies below 300Hz!
+            # Generate extremely low-amplitude white noise (RMS ~115) to keep the NeoX PBX VAD alive.
+            # Reduced from 1500 to 200 to make it practically inaudible to the human ear while still satisfying the gateway.
             import random
-            samples = [random.randint(-1500, 1500) for _ in range(160)]
+            samples = [random.randint(-200, 200) for _ in range(160)]
             comfort_packet = struct.pack(">BH", 0x10, 320) + struct.pack("<160h", *samples)
             
             try:
