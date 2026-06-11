@@ -150,6 +150,7 @@ async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wa
     Runs the STT, LLM (Gemini), and TTS (Sarvam) pipeline concurrently.
     """
     try:
+        print(f"    [DEBUG Server] Saving recording: {wav_path} ({len(audio_frames)} bytes)")
         # 1. Save to unique WAV (8kHz, 16-bit, Mono) inside an executor thread
         def save_wav():
             with wave.open(wav_path, "wb") as wf:
@@ -159,14 +160,18 @@ async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wa
                 wf.writeframes(audio_frames)
                 
         await asyncio.to_thread(save_wav)
+        print(f"    [DEBUG Server] Saved recording successfully.")
         
         # 2. STT via Sarvam
+        print(f"    [DEBUG Server] Invoking Sarvam STT on {wav_path}...")
         transcript, detected_lang = await asyncio.to_thread(sarvam_stt, wav_path)
         if not transcript:
+            print(f"    [DEBUG Server] No speech transcript detected. Aborting pipeline.")
             return None, detected_lang
             
         print("─" * 50)
         print(f"📝  User: {transcript}")
+        print(f"    [DEBUG Server] Detected Language: '{detected_lang}'")
         
         # 3. LLM via Gemini
         kb_path = "knowledge_base.json"
@@ -175,6 +180,7 @@ async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wa
             with open(kb_path, "r") as f:
                 kb = json.load(f)
                 
+        print(f"    [DEBUG Server] Calling Gemini with history length: {len(chat_history)}...")
         answer = await asyncio.to_thread(get_gemini_response, transcript, chat_history, detected_lang, kb)
         print(f"🤖  AI:   {answer}")
         print("─" * 50)
@@ -182,18 +188,23 @@ async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wa
         # Save to history
         chat_history.append({"role": "user", "content": transcript})
         chat_history.append({"role": "assistant", "content": answer})
+        print(f"    [DEBUG Server] History updated. Size: {len(chat_history)}")
         
         # 4. TTS via Sarvam
-        print("    Generating speech...")
+        print(f"    [DEBUG Server] Invoking Sarvam TTS for text: '{answer}'")
         tts_success = await asyncio.to_thread(sarvam_tts, answer, detected_lang, out_path)
         if tts_success:
+            print(f"    [DEBUG Server] Sarvam TTS saved speech to {out_path}")
             return out_path, detected_lang
+        else:
+            print(f"    [ERROR Server] Sarvam TTS generation failed.")
     except Exception as e:
-        print(f"    [run_voice_pipeline] Error: {e}")
+        print(f"    [ERROR Server] Exception in run_voice_pipeline: {e}")
     finally:
         if os.path.exists(wav_path):
             try:
                 os.remove(wav_path)
+                print(f"    [DEBUG Server] Cleaned up temporary WAV file: {wav_path}")
             except Exception:
                 pass
     return None, lang_code

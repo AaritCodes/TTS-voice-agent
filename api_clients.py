@@ -8,7 +8,13 @@ def setup_gemini():
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def get_gemini_response(prompt_text, chat_history, language_code, kb_context):
+    import traceback
     try:
+        print(f"\n[DEBUG Gemini] ──── Calling Gemini API ────")
+        print(f"[DEBUG Gemini] Prompt: '{prompt_text}'")
+        print(f"[DEBUG Gemini] Language Code: '{language_code}'")
+        print(f"[DEBUG Gemini] Raw Chat History: {json.dumps(chat_history, ensure_ascii=False)}")
+        
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         system_prompt = f"""You are a helpful multilingual voice assistant.
@@ -20,21 +26,30 @@ Rules:
 {json.dumps(kb_context, indent=2, ensure_ascii=False)}
 """
         
-        # Convert our history format to Gemini's format
+        # Convert our history format to Gemini's format using the correct SDK dictionary structure
         formatted_history = []
         for msg in chat_history:
             role = "model" if msg["role"] == "assistant" else "user"
-            formatted_history.append({"role": role, "parts": [msg["content"]]})
+            formatted_history.append({
+                "role": role,
+                "parts": [{"text": msg["content"]}]
+            })
             
+        print(f"[DEBUG Gemini] Formatted History for SDK: {json.dumps(formatted_history, ensure_ascii=False)}")
+        
+        print(f"[DEBUG Gemini] Starting chat session...")
         chat = model.start_chat(history=formatted_history)
         
         # Combine system prompt with the actual user message
         full_message = f"System Context:\n{system_prompt}\n\nUser Question:\n{prompt_text}"
         
+        print(f"[DEBUG Gemini] Sending message to Gemini...")
         response = chat.send_message(full_message)
+        print(f"[DEBUG Gemini] Gemini replied successfully!")
         return response.text
     except Exception as e:
-        print(f"Error calling Gemini: {e}")
+        print(f"\n[ERROR Gemini] Exception occurred in get_gemini_response:")
+        traceback.print_exc()
         return "I am sorry, I am unable to answer right now."
 
 def sarvam_stt(audio_file_path):
