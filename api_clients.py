@@ -13,8 +13,8 @@ def get_gemini_response(prompt_text, chat_history, language_code, kb_context):
         
         system_prompt = f"""You are a helpful multilingual voice assistant.
 Rules:
-1. Answer concisely and naturally for voice conversations. Keep your reply extremely short (1-2 sentences, maximum 300 characters).
-2. CRITICAL: Your response MUST be under 400 characters to fit TTS engine constraints.
+1. Answer concisely and naturally for voice conversations. Keep your reply extremely short (exactly 1 short sentence, maximum 150 characters, around 10-15 words).
+2. CRITICAL: Your response MUST be under 150 characters to fit voice bot pacing and ensure ultra-fast text-to-speech generation.
 3. The user's detected language code is: {language_code}. You MUST respond in this language.
 4. Use the following knowledge base if relevant, but feel free to use your general knowledge to answer any other questions:
 {json.dumps(kb_context, indent=2, ensure_ascii=False)}

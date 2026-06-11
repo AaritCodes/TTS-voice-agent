@@ -8,6 +8,8 @@ import tempfile
 import asyncio
 from dotenv import load_dotenv
 
+import random
+
 # Load environment variables (API keys)
 load_dotenv()
 
@@ -122,16 +124,21 @@ async def process_call_async(reader, writer):
         
         # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
         async def keep_alive():
-            silence_payload = b"\x00" * 320
-            silence_header = struct.pack(">BH", 0x10, len(silence_payload))
-            silence_packet = silence_header + silence_payload
             try:
                 while True:
                     if writer.is_closing():
                         break
+                    
+                    # Generate low-amplitude comfort noise (160 samples of 16-bit signed PCM)
+                    # to keep any SIP trunk/gateway RTP VAD (Voice Activity Detection) alive
+                    samples = [random.randint(-15, 15) for _ in range(160)]
+                    comfort_payload = struct.pack("<160h", *samples)
+                    comfort_header = struct.pack(">BH", 0x10, len(comfort_payload))
+                    comfort_packet = comfort_header + comfort_payload
+                    
                     async with write_lock:
                         if not is_streaming_response:
-                            writer.write(silence_packet)
+                            writer.write(comfort_packet)
                             await writer.drain()
                     await asyncio.sleep(0.02) # standard RTP keep-alive every 20ms (50 packets/sec)
             except asyncio.CancelledError:
