@@ -138,7 +138,7 @@ async def process_call_async(reader, writer):
 
         keep_alive_task = asyncio.create_task(keep_alive())
         
-        SILENCE_THRESHOLD_RMS = 500  # Minimum energy to count as speech
+        SILENCE_THRESHOLD_RMS = 1500  # Minimum energy to count as speech
         MAX_SILENCE_CHUNKS = 75      # 75 chunks of 20ms = 1.5 seconds of silence
         
         print("\n🎧  Listening for audio...")
