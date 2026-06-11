@@ -23,8 +23,8 @@ from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tt
 setup_gemini()
 
 # Host and Port Configuration
-# Bind to 127.0.0.1 for security, as Asterisk resides on the same VM and connects locally.
-HOST = '127.0.0.1'
+# Bind to 0.0.0.0 to accept connections from any interface (local loopback and external networks).
+HOST = '0.0.0.0'
 PORT = 9090
 
 async def recvall_async(reader, n):
