@@ -211,8 +211,10 @@ async def process_call_async(reader, writer):
                                 pass
                                 
                     print("─" * 50)
-                    print(f"📝  User: {transcript}")
+                    print(f"📝  User: {transcript if transcript else '(empty — STT returned no text)'}")
                     
+                    if not transcript:
+                        print("    ⚠️  Skipping Gemini+TTS because transcript is empty.")
                     if transcript:
                         # 3. LLM via Gemini (blocking network operation offloaded to thread)
                         kb_path = "knowledge_base.json"

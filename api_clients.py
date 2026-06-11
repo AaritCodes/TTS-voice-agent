@@ -38,11 +38,9 @@ Rules:
         return "I am sorry, I am unable to answer right now."
 
 def sarvam_stt(audio_file_path):
-    url = "https://api.sarvam.ai/speech-to-text-translate" # typically it's this or speech-to-text
-    # We will use /speech-to-text for native language, /speech-to-text-translate for english translation
-    # Let's use speech-to-text
     url = "https://api.sarvam.ai/speech-to-text"
     headers = {"api-subscription-key": os.getenv("SARVAM_API_KEY")}
+    print(f"    [Sarvam STT] ▶ Input audio: {audio_file_path}")
     try:
         with open(audio_file_path, "rb") as f:
             files = {"file": (audio_file_path, f, "audio/wav")}
@@ -51,19 +49,24 @@ def sarvam_stt(audio_file_path):
             
         if response.status_code == 200:
             result = response.json()
-            # If the API returns language_code, great. If not, default to en-IN for safety.
-            return result.get("transcript", ""), result.get("language_code", "en-IN")
+            transcript = result.get("transcript", "")
+            lang_code = result.get("language_code", "en-IN")
+            print(f"    [Sarvam STT] ◀ Transcript : '{transcript}'")
+            print(f"    [Sarvam STT] ◀ Language   : '{lang_code}'")
+            return transcript, lang_code
         else:
-            print(f"Sarvam STT Error: {response.text}")
+            print(f"    [Sarvam STT] ✗ HTTP {response.status_code}: {response.text}")
             return "", "en-IN"
     except Exception as e:
-        print(f"Error calling Sarvam STT: {e}")
+        print(f"    [Sarvam STT] ✗ Exception: {e}")
         return "", "en-IN"
 
 def sarvam_tts(text, language_code, output_file_path):
     # Enforce a strict 490 character truncation safeguard to satisfy Sarvam TTS limit (max 500 characters)
     if len(text) > 490:
         text = text[:487] + "..."
+
+    print(f"    [Sarvam TTS] ▶ Input text ({language_code}): '{text}'")
         
     url = "https://api.sarvam.ai/text-to-speech"
     headers = {
@@ -88,10 +91,11 @@ def sarvam_tts(text, language_code, output_file_path):
             import base64
             with open(output_file_path, "wb") as f:
                 f.write(base64.b64decode(audio_base64))
+            print(f"    [Sarvam TTS] ◀ Audio saved to: {output_file_path}")
             return True
         else:
-            print(f"Sarvam TTS Error: {response.text}")
+            print(f"    [Sarvam TTS] ✗ HTTP {response.status_code}: {response.text}")
             return False
     except Exception as e:
-        print(f"Error calling Sarvam TTS: {e}")
+        print(f"    [Sarvam TTS] ✗ Exception: {e}")
         return False
