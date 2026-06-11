@@ -124,11 +124,11 @@ async def process_call_async(reader, writer):
         
         # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
         async def keep_alive():
-            # Generate a 200Hz soft hum (amplitude 400 = RMS ~280) to bypass strict carrier VADs (like NeoX PBX)
-            # 160 samples of 16-bit PCM at 8000Hz = 20ms of audio (320 bytes)
-            import math
-            hum_samples = [int(400 * math.sin(2 * math.pi * 200 * (i / 8000.0))) for i in range(160)]
-            comfort_packet = struct.pack(">BH", 0x10, len(hum_samples) * 2) + struct.pack("<160h", *hum_samples)
+            # Generate low-amplitude white noise (RMS ~800) to keep the NeoX PBX Voice Activity Detection alive.
+            # We use white noise instead of a 200Hz hum because telecom gateways physically filter out all frequencies below 300Hz!
+            import random
+            samples = [random.randint(-1500, 1500) for _ in range(160)]
+            comfort_packet = struct.pack(">BH", 0x10, 320) + struct.pack("<160h", *samples)
             
             try:
                 while True:
