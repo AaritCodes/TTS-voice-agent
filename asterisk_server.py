@@ -138,26 +138,62 @@ async def process_call_async(reader, writer):
 
         keep_alive_task = asyncio.create_task(keep_alive())
         
+        # Continuous background reader task to drain Asterisk's TCP stream.
+        # This prevents TCP write buffer saturation on Asterisk during long STT/LLM/TTS operations,
+        # completely eliminating premature hangups (connection reset / broken pipe).
+        audio_queue = asyncio.Queue()
+        
+        async def socket_reader():
+            try:
+                while True:
+                    header = await recvall_async(reader, 3)
+                    if not header:
+                        await audio_queue.put(None)
+                        break
+                    
+                    kind, length = struct.unpack(">BH", header)
+                    
+                    if kind == 0x00:
+                        await audio_queue.put((0x00, b""))
+                        break
+                    elif kind == 0x10:
+                        payload = await recvall_async(reader, length)
+                        if not payload:
+                            await audio_queue.put(None)
+                            break
+                        await audio_queue.put((0x10, payload))
+                    elif kind == 0xff:
+                        payload = await recvall_async(reader, length)
+                        if not payload:
+                            await audio_queue.put(None)
+                            break
+                        await audio_queue.put((0xff, payload))
+                    else:
+                        # Skip unknown frame types safely
+                        payload = await recvall_async(reader, length)
+            except Exception as e:
+                print(f"    [socket_reader] Exception: {e}")
+                await audio_queue.put(None)
+
+        reader_task = asyncio.create_task(socket_reader())
+        
         SILENCE_THRESHOLD_RMS = 500  # Minimum energy to count as speech (aligned with backup branch)
         MAX_SILENCE_CHUNKS = 75      # 75 chunks of 20ms = 1.5 seconds of silence
         
         print("\n🎧  Listening for audio...")
         
         while True:
-            header = await recvall_async(reader, 3)
-            if not header: break
-            
-            kind, length = struct.unpack(">BH", header)
+            packet = await audio_queue.get()
+            if packet is None:
+                break
+                
+            kind, payload = packet
             
             if kind == 0x00:
                 print("\n❌  Call hung up by Asterisk.")
                 break
                 
             elif kind == 0x10:
-                # Incoming Audio
-                payload = await recvall_async(reader, length)
-                if not payload: break
-                
                 # Measure volume using our robust fallback wrapper (removed byteswap to match backup branch)
                 rms = get_rms(payload)
                 
@@ -258,22 +294,29 @@ async def process_call_async(reader, writer):
                                     pass
                     
                     # Reset for the next sentence
+                    # Flush any stale audio frames that buffered in the queue while we were thinking/speaking
+                    while not audio_queue.empty():
+                        try:
+                            audio_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                            
                     print("\n🎧  Listening for audio...")
                     frames.clear()
                     is_recording = False
                     silence_frames = 0
                     
             elif kind == 0xff:
-                err_payload = await recvall_async(reader, length)
-                print(f"\n❌  Asterisk Error Code: {err_payload}")
+                print(f"\n❌  Asterisk Error Code: {payload}")
                 break
     except Exception as e:
         print(f"    [ERROR] Exception in call processing: {e}")
     finally:
-        # Cancel the keep-alive background task
+        # Cancel background tasks cleanly
+        reader_task.cancel()
         keep_alive_task.cancel()
         try:
-            await keep_alive_task
+            await asyncio.gather(reader_task, keep_alive_task, return_exceptions=True)
         except Exception:
             pass
             
