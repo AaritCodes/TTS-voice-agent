@@ -100,6 +100,7 @@ async def process_call_async(reader, writer):
     wav_path = os.path.join(tempfile.gettempdir(), f"incoming_{session_id}.wav")
     out_path = os.path.join(tempfile.gettempdir(), f"outgoing_{session_id}.wav")
     chat_history = []
+    write_lock = asyncio.Lock()
     
     try:
         # Read the initial UUID packet (type 0x01)
@@ -128,9 +129,10 @@ async def process_call_async(reader, writer):
                 while True:
                     if writer.is_closing():
                         break
-                    if not is_streaming_response:
-                        writer.write(silence_packet)
-                        await writer.drain()
+                    async with write_lock:
+                        if not is_streaming_response:
+                            writer.write(silence_packet)
+                            await writer.drain()
                     await asyncio.sleep(0.02) # standard RTP keep-alive every 20ms (50 packets/sec)
             except asyncio.CancelledError:
                 pass
@@ -277,17 +279,18 @@ async def process_call_async(reader, writer):
                                     raw_8k = await asyncio.to_thread(read_and_downsample)
                                     
                                     # Stream in small 320-byte chunks to prevent buffering issues
-                                    for i in range(0, len(raw_8k), 320):
-                                        chunk = raw_8k[i:i+320]
-                                        
-                                        out_header = struct.pack(">BH", 0x10, len(chunk))
-                                        try:
-                                            writer.write(out_header + chunk)
-                                            await writer.drain() # Wait for non-blocking socket buffer write
-                                        except Exception as e:
-                                            print(f"    [ERROR] Connection lost while streaming: {e}")
-                                            break
-                                        await asyncio.sleep(0.015) # Non-blocking cooperative delay
+                                    async with write_lock:
+                                        for i in range(0, len(raw_8k), 320):
+                                            chunk = raw_8k[i:i+320]
+                                            
+                                            out_header = struct.pack(">BH", 0x10, len(chunk))
+                                            try:
+                                                writer.write(out_header + chunk)
+                                                await writer.drain() # Wait for non-blocking socket buffer write
+                                            except Exception as e:
+                                                print(f"    [ERROR] Connection lost while streaming: {e}")
+                                                break
+                                            await asyncio.sleep(0.02) # Standard RTP pacing (20ms)
                                 finally:
                                     is_streaming_response = False
                         finally:
