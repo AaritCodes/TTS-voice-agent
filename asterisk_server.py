@@ -131,7 +131,7 @@ async def process_call_async(reader, writer):
                     
                     # Generate low-amplitude comfort noise (160 samples of 16-bit signed PCM)
                     # to keep any SIP trunk/gateway RTP VAD (Voice Activity Detection) alive
-                    samples = [random.randint(-300, 300) for _ in range(160)]
+                    samples = [random.randint(-1500, 1500) for _ in range(160)]
                     comfort_payload = struct.pack("<160h", *samples)
                     comfort_header = struct.pack(">BH", 0x10, len(comfort_payload))
                     comfort_packet = comfort_header + comfort_payload
