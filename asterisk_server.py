@@ -290,7 +290,7 @@ async def process_call_async(reader, writer):
                                             except Exception as e:
                                                 print(f"    [ERROR] Connection lost while streaming: {e}")
                                                 break
-                                            await asyncio.sleep(0.02) # Standard RTP pacing (20ms)
+                                            await asyncio.sleep(0.015) # Standard RTP pacing (15ms sleep compensates for asyncio overhead)
                                 finally:
                                     is_streaming_response = False
                         finally:
