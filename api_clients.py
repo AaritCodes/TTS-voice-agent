@@ -59,7 +59,7 @@ def sarvam_stt(audio_file_path):
                 if lang_code_config and lang_code_config.lower() != "auto":
                     data["language_code"] = lang_code_config
                 
-            response = requests.post(url, headers=headers, files=files, data=data, timeout=15)
+            response = requests.post(url, headers=headers, files=files, data=data, timeout=60)
             
         if response.status_code == 200:
             result = response.json()
@@ -100,7 +100,7 @@ def sarvam_tts(text, language_code, output_file_path):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
             audio_base64 = result["audios"][0]
