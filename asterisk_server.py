@@ -138,7 +138,7 @@ async def process_call_async(reader, writer):
 
         keep_alive_task = asyncio.create_task(keep_alive())
         
-        SILENCE_THRESHOLD_RMS = 1500  # Minimum energy to count as speech
+        SILENCE_THRESHOLD_RMS = 500  # Minimum energy to count as speech (aligned with backup branch)
         MAX_SILENCE_CHUNKS = 75      # 75 chunks of 20ms = 1.5 seconds of silence
         
         print("\n🎧  Listening for audio...")
@@ -158,15 +158,7 @@ async def process_call_async(reader, writer):
                 payload = await recvall_async(reader, length)
                 if not payload: break
                 
-                # Swap big-endian AudioSocket PCM to native little-endian (wave/audioop/STT standard)
-                if audioop is not None:
-                    payload = audioop.byteswap(payload, 2)
-                else:
-                    import numpy as np
-                    samples = np.frombuffer(payload, dtype='>i2')
-                    payload = samples.astype('<i2').tobytes()
-                
-                # Measure volume using our robust fallback wrapper
+                # Measure volume using our robust fallback wrapper (removed byteswap to match backup branch)
                 rms = get_rms(payload)
                 
                 frame_count += 1
@@ -247,17 +239,9 @@ async def process_call_async(reader, writer):
                                     for i in range(0, len(raw_8k), 320):
                                         chunk = raw_8k[i:i+320]
                                         
-                                        # Swap little-endian PCM chunk back to big-endian for AudioSocket
-                                        if audioop is not None:
-                                            chunk_be = audioop.byteswap(chunk, 2)
-                                        else:
-                                            import numpy as np
-                                            samples = np.frombuffer(chunk, dtype='<i2')
-                                            chunk_be = samples.astype('>i2').tobytes()
-                                            
-                                        out_header = struct.pack(">BH", 0x10, len(chunk_be))
+                                        out_header = struct.pack(">BH", 0x10, len(chunk))
                                         try:
-                                            writer.write(out_header + chunk_be)
+                                            writer.write(out_header + chunk)
                                             await writer.drain() # Wait for non-blocking socket buffer write
                                         except Exception as e:
                                             print(f"    [ERROR] Connection lost while streaming: {e}")
