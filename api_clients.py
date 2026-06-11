@@ -42,9 +42,16 @@ def sarvam_stt(audio_file_path):
     headers = {"api-subscription-key": os.getenv("SARVAM_API_KEY")}
     print(f"    [Sarvam STT] ▶ Input audio: {audio_file_path}")
     try:
+        # Get language code from .env, default to 'en-IN' to prevent noise/silence auto-LID issues.
+        # Set VOICE_LANGUAGE_CODE=auto in your .env if you wish to use multi-language auto-detection.
+        lang_code_config = os.getenv("VOICE_LANGUAGE_CODE", "en-IN")
+        
         with open(audio_file_path, "rb") as f:
             files = {"file": (audio_file_path, f, "audio/wav")}
             data = {"model": "saaras:v3"}
+            if lang_code_config and lang_code_config.lower() != "auto":
+                data["language_code"] = lang_code_config
+                
             response = requests.post(url, headers=headers, files=files, data=data)
             
         if response.status_code == 200:
