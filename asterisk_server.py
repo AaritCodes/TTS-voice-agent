@@ -278,19 +278,40 @@ async def process_call_async(reader, writer):
                                             
                                     raw_8k = await asyncio.to_thread(read_and_downsample)
                                     
-                                    # Stream in small 320-byte chunks to prevent buffering issues
-                                    async with write_lock:
-                                        for i in range(0, len(raw_8k), 320):
-                                            chunk = raw_8k[i:i+320]
+                                    # Drift-free clock-aligned pacing
+                                    start_time = asyncio.get_event_loop().time()
+                                    chunk_duration = 0.02 # 20ms of audio per 320-byte chunk
+                                    total_chunks = len(raw_8k) // 320
+                                    print(f"    [Streaming] Starting stream of {len(raw_8k)} bytes ({total_chunks} chunks, ~{total_chunks*0.02:.2f}s of audio)...")
+                                    
+                                    for idx, i in enumerate(range(0, len(raw_8k), 320)):
+                                        chunk = raw_8k[i:i+320]
+                                        if len(chunk) < 320:
+                                            chunk = chunk + b"\x00" * (320 - len(chunk))
                                             
-                                            out_header = struct.pack(">BH", 0x10, len(chunk))
+                                        out_header = struct.pack(">BH", 0x10, len(chunk))
+                                        
+                                        async with write_lock:
                                             try:
                                                 writer.write(out_header + chunk)
                                                 await writer.drain() # Wait for non-blocking socket buffer write
                                             except Exception as e:
                                                 print(f"    [ERROR] Connection lost while streaming: {e}")
                                                 break
-                                            await asyncio.sleep(0.015) # Standard RTP pacing (15ms sleep compensates for asyncio overhead)
+                                                
+                                        # Calculate expected elapsed time and dynamically sleep to correct any drift/overhead
+                                        expected_elapsed = (idx + 1) * chunk_duration
+                                        actual_elapsed = asyncio.get_event_loop().time() - start_time
+                                        sleep_dur = expected_elapsed - actual_elapsed
+                                        
+                                        if sleep_dur > 0:
+                                            await asyncio.sleep(sleep_dur)
+                                        else:
+                                            # Yield to event loop if lagging, without sleeping
+                                            await asyncio.sleep(0)
+                                            
+                                    actual_total_time = asyncio.get_event_loop().time() - start_time
+                                    print(f"    [Streaming] Completed stream in {actual_total_time:.3f}s (target: {total_chunks*0.02:.3f}s, drift: {actual_total_time - total_chunks*0.02:+.3f}s)")
                                 finally:
                                     is_streaming_response = False
                         finally:
