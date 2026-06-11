@@ -99,6 +99,7 @@ async def process_call_async(reader, writer):
     session_id = str(uuid.uuid4())
     wav_path = os.path.join(tempfile.gettempdir(), f"incoming_{session_id}.wav")
     out_path = os.path.join(tempfile.gettempdir(), f"outgoing_{session_id}.wav")
+    chat_history = []
     
     try:
         # Read the initial UUID packet (type 0x01)
@@ -130,7 +131,7 @@ async def process_call_async(reader, writer):
                     if not is_streaming_response:
                         writer.write(silence_packet)
                         await writer.drain()
-                    await asyncio.sleep(0.1) # comfort keep-alive every 100ms
+                    await asyncio.sleep(0.02) # standard RTP keep-alive every 20ms (50 packets/sec)
             except asyncio.CancelledError:
                 pass
             except Exception as e:
@@ -251,9 +252,13 @@ async def process_call_async(reader, writer):
                             with open(kb_path, "r") as f:
                                 kb = json.load(f)
                                 
-                        answer = await asyncio.to_thread(get_gemini_response, transcript, [], lang_code, kb)
+                        answer = await asyncio.to_thread(get_gemini_response, transcript, chat_history, lang_code, kb)
                         print(f"🤖  AI:   {answer}")
                         print("─" * 50)
+                        
+                        # Save to history for multi-turn conversational context
+                        chat_history.append({"role": "user", "content": transcript})
+                        chat_history.append({"role": "assistant", "content": answer})
                         
                         # 4. TTS via Sarvam (blocking network operation offloaded to thread)
                         print("    Generating speech...")
