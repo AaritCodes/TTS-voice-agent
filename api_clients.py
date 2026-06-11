@@ -38,26 +38,35 @@ Rules:
         return "I am sorry, I am unable to answer right now."
 
 def sarvam_stt(audio_file_path):
-    url = "https://api.sarvam.ai/speech-to-text"
-    headers = {"api-subscription-key": os.getenv("SARVAM_API_KEY")}
-    print(f"    [Sarvam STT] ▶ Input audio: {audio_file_path}")
-    try:
-        # Get language code from .env, default to 'en-IN' to prevent noise/silence auto-LID issues.
-        # Set VOICE_LANGUAGE_CODE=auto in your .env if you wish to use multi-language auto-detection.
-        lang_code_config = os.getenv("VOICE_LANGUAGE_CODE", "en-IN")
+    # Check if we should translate any input Indian language directly to English
+    translate_to_english = os.getenv("STT_TRANSLATE_TO_ENGLISH", "true").lower() == "true"
+    
+    if translate_to_english:
+        url = "https://api.sarvam.ai/speech-to-text-translate"
+    else:
+        url = "https://api.sarvam.ai/speech-to-text"
         
+    headers = {"api-subscription-key": os.getenv("SARVAM_API_KEY")}
+    print(f"    [Sarvam STT] ▶ Input audio: {audio_file_path} (Translate to English: {translate_to_english})")
+    try:
         with open(audio_file_path, "rb") as f:
             files = {"file": (audio_file_path, f, "audio/wav")}
             data = {"model": "saaras:v3"}
-            if lang_code_config and lang_code_config.lower() != "auto":
-                data["language_code"] = lang_code_config
+            
+            # If we are not translating, we can apply a specific voice language code if configured
+            if not translate_to_english:
+                lang_code_config = os.getenv("VOICE_LANGUAGE_CODE", "auto")
+                if lang_code_config and lang_code_config.lower() != "auto":
+                    data["language_code"] = lang_code_config
                 
             response = requests.post(url, headers=headers, files=files, data=data)
             
         if response.status_code == 200:
             result = response.json()
             transcript = result.get("transcript", "")
-            lang_code = result.get("language_code", "en-IN")
+            # If translating, force language code to en-IN for downstream Gemini/TTS.
+            # Otherwise, use the detected language code returned by the API (or fallback to en-IN).
+            lang_code = "en-IN" if translate_to_english else result.get("language_code", "en-IN")
             print(f"    [Sarvam STT] ◀ Transcript : '{transcript}'")
             print(f"    [Sarvam STT] ◀ Language   : '{lang_code}'")
             return transcript, lang_code
