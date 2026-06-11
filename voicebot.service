@@ -1,0 +1,38 @@
+[Unit]
+Description=Asterisk AudioSocket Voice Bot Server
+After=network.target asterisk.service
+Documentation=https://github.com/STL-Digital-01/Stl-tts-voice-agent
+
+[Service]
+Type=simple
+User=arvind_ahirwar
+Group=arvind_ahirwar
+WorkingDirectory=/home/arvind_ahirwar/Stl-tts-voice-agent
+EnvironmentFile=/home/arvind_ahirwar/Stl-tts-voice-agent/.env
+ExecStart=/home/arvind_ahirwar/Stl-tts-voice-agent/venv/bin/python3 -u /home/arvind_ahirwar/Stl-tts-voice-agent/asterisk_server.py
+
+# Restart parameters (fault-tolerant & robust)
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Standard output redirection to journald (systemd handles logging securely)
+StandardOutput=journal
+StandardError=journal
+
+# Security Hardening & Sandboxing
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+DeviceAllow=/dev/null r
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
