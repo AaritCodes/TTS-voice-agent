@@ -69,11 +69,7 @@ async function sendAudioToAPI(audioBlob) {
     formData.append("audio_file", audioBlob, "recording.wav");
 
     try {
-        // Retrieve current session ID if exists
-        let sessionId = localStorage.getItem('session_id') || '';
-        const url = sessionId ? `/GetAnswer?session_id=${encodeURIComponent(sessionId)}` : '/GetAnswer';
-
-        const response = await fetch(url, {
+        const response = await fetch('/GetAnswer', {
             method: 'POST',
             body: formData
         });
@@ -83,11 +79,6 @@ async function sendAudioToAPI(audioBlob) {
         }
 
         const data = await response.json();
-        
-        // Save the returned session ID for subsequent requests
-        if (data.session_id) {
-            localStorage.setItem('session_id', data.session_id);
-        }
         
         // Update user message with transcript
         userMsg.textContent = data.transcript;

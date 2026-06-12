@@ -3,7 +3,7 @@ import json
 import base64
 import tempfile
 import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
@@ -43,24 +43,15 @@ def load_knowledge_base():
     except Exception:
         return {}
 
-# Thread-safe dictionary to maintain isolated chat histories for individual user sessions
-chat_histories = {}
+# Global memory for demo purposes
+# In production, use a database keyed by session_id
+chat_history = []
 kb = load_knowledge_base()
 
 @app.post("/GetAnswer")
-async def get_answer(
-    audio_file: UploadFile = File(...),
-    session_id: str = Query(None, description="Unique session ID for the user's chat history")
-):
+async def get_answer(audio_file: UploadFile = File(...)):
     if not audio_file.filename.endswith(('.wav', '.mp3', '.ogg', '.flac')):
         raise HTTPException(status_code=400, detail="Unsupported audio format")
-    
-    # If no session ID is supplied, generate a unique one
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        
-    # Get or create the isolated chat history for this specific session
-    session_history = chat_histories.setdefault(session_id, [])
     
     # Save the uploaded file temporarily
     temp_id = str(uuid.uuid4())
@@ -82,12 +73,12 @@ async def get_answer(
         
         # LLM
         mapped_lang = LANGUAGE_MAP.get(lang_code, "en-IN")
-        answer = get_gemini_response(transcript, session_history, mapped_lang, kb)
+        answer = get_gemini_response(transcript, chat_history, mapped_lang, kb)
         print(f"[{temp_id}] Assistant says: {answer}")
         
-        # Update session-specific history
-        session_history.append({"role": "user", "content": transcript})
-        session_history.append({"role": "assistant", "content": answer})
+        # Update history
+        chat_history.append({"role": "user", "content": transcript})
+        chat_history.append({"role": "assistant", "content": answer})
         
         # TTS
         print(f"[{temp_id}] Generating audio...")
@@ -100,7 +91,6 @@ async def get_answer(
             audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
             
         return {
-            "session_id": session_id,
             "transcript": transcript,
             "detected_language": lang_code,
             "answer_text": answer,
@@ -110,12 +100,6 @@ async def get_answer(
     finally:
         # Cleanup temp files
         if os.path.exists(input_path):
-            try:
-                os.remove(input_path)
-            except Exception:
-                pass
+            os.remove(input_path)
         if os.path.exists(output_path):
-            try:
-                os.remove(output_path)
-            except Exception:
-                pass
+            os.remove(output_path)
