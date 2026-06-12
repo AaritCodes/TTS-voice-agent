@@ -30,3 +30,7 @@ desktop.ini
 # ─── Docs generator (optional, remove if you want it on GitHub) ───
 generate_docs.py
 Voice_Assistant_Documentation.docx
+
+# ─── Virtual Environments ───
+tts_venv/
+frontend/node_modules/
