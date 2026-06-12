@@ -2,21 +2,87 @@ import os
 import requests
 import google.generativeai as genai
 import json
+from pinecone import Pinecone
 
 # Configure Gemini
 def setup_gemini():
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-def get_gemini_response(prompt_text, chat_history, language_code, kb_context):
+_pinecone_index = None
+
+def get_pinecone_index():
+    global _pinecone_index
+    if _pinecone_index is None:
+        try:
+            api_key = os.getenv("PINECONE_API_KEY")
+            index_name = os.getenv("PINECONE_INDEX_NAME", "voice-agent-kb")
+            if api_key:
+                pc = Pinecone(api_key=api_key)
+                _pinecone_index = pc.Index(index_name)
+        except Exception as e:
+            print(f"Error connecting to Pinecone: {e}")
+    return _pinecone_index
+
+def query_pinecone(query_text, num_results=3):
+    idx = get_pinecone_index()
+    if idx is None:
+        print("Warning: Pinecone index not initialized, skipping semantic search.")
+        return ""
+        
+    try:
+        # Generate query embedding using models/gemini-embedding-001 via HTTP REST API
+        api_key = os.getenv("GEMINI_API_KEY")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={api_key}"
+        payload = {
+            "model": "models/gemini-embedding-001",
+            "content": {
+                "parts": [{
+                    "text": query_text
+                }]
+            }
+        }
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            print(f"Error calling Gemini Embedding API: {response.text}")
+            return ""
+            
+        query_vector = response.json()["embedding"]["values"]
+        
+        # Query Pinecone index
+        response = idx.query(
+            vector=query_vector,
+            top_k=num_results,
+            include_metadata=True
+        )
+        
+        # Extract text from matches
+        relevant_chunks = []
+        for match in response.get("matches", []):
+            if match.get("metadata") and "text" in match["metadata"]:
+                relevant_chunks.append(match["metadata"]["text"])
+                
+        return "\n\n".join(relevant_chunks)
+    except Exception as e:
+        print(f"Error querying Pinecone: {e}")
+        return ""
+
+def get_gemini_response(prompt_text, chat_history, language_code, kb_context=None):
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         
+        # Fetch relevant chunks semantically from Pinecone
+        relevant_context = query_pinecone(prompt_text)
+        
+        # Fall back to local kb_context (JSON) if Pinecone returns nothing
+        if not relevant_context and kb_context:
+            relevant_context = json.dumps(kb_context, indent=2, ensure_ascii=False)
+            
         system_prompt = f"""You are a helpful multilingual voice assistant.
 Rules:
 1. Answer concisely and naturally for voice conversations.
 2. The user's detected language code is: {language_code}. You MUST respond in this language.
-3. Use the following knowledge base if relevant, but feel free to use your general knowledge to answer any other questions:
-{json.dumps(kb_context, indent=2, ensure_ascii=False)}
+3. Use the following relevant guidelines to answer the user's question:
+{relevant_context}
 """
         
         # Convert our history format to Gemini's format

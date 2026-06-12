@@ -8,6 +8,7 @@ SpeechRecognition
 fastapi
 uvicorn
 python-multipart
-p s u t i l  
-pedalboard  
- 
+psutil
+pedalboard
+pinecone
+pypdf

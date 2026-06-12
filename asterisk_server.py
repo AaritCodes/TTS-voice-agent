@@ -174,14 +174,8 @@ async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wa
         print(f"    [DEBUG Server] Detected Language: '{detected_lang}'")
         
         # 3. LLM via Gemini
-        kb_path = "knowledge_base.json"
-        kb = {}
-        if os.path.exists(kb_path):
-            with open(kb_path, "r") as f:
-                kb = json.load(f)
-                
         print(f"    [DEBUG Server] Calling Gemini with history length: {len(chat_history)}...")
-        answer = await asyncio.to_thread(get_gemini_response, transcript, chat_history, detected_lang, kb)
+        answer = await asyncio.to_thread(get_gemini_response, transcript, chat_history, detected_lang)
         print(f"🤖  AI:   {answer}")
         print("─" * 50)
         

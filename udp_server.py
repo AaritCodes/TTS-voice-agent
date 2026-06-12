@@ -46,15 +46,7 @@ SAMPLE_WIDTH = 2        # 16-bit PCM
 load_dotenv()
 setup_gemini()
 
-# Load knowledge base
-def load_knowledge_base():
-    try:
-        with open("knowledge_base.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-kb = load_knowledge_base()
+# Pinecone RAG is used automatically by api_clients.py
 chat_histories = {}  # Per-caller chat history, keyed by (ip, port)
 
 LANGUAGE_MAP = {
@@ -114,7 +106,7 @@ def process_call(sock, caller_addr, audio_chunks):
         # ── STEP 3: Gemini LLM ──
         mapped_lang = LANGUAGE_MAP.get(lang_code, "en-IN")
         print(f"[CALL] Querying Gemini...")
-        answer = get_gemini_response(transcript, history, mapped_lang, kb)
+        answer = get_gemini_response(transcript, history, mapped_lang)
         print(f"[CALL] Gemini says: '{answer}'")
         
         # Update conversation memory
