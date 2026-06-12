@@ -81,8 +81,9 @@ def get_gemini_response(prompt_text, chat_history, language_code, kb_context=Non
 Rules:
 1. Answer concisely and naturally for voice conversations.
 2. The user's detected language code is: {language_code}. You MUST respond in this language.
-3. Use the following relevant guidelines to answer the user's question:
+3. If the user's question is related to the support guidelines or meeting notes, use the following retrieved context to answer:
 {relevant_context}
+If the question is unrelated to the context (e.g., general knowledge, small talk, or general advice), use your own knowledge to answer concisely and naturally. Do not refuse to answer general questions.
 """
         
         # Convert our history format to Gemini's format
