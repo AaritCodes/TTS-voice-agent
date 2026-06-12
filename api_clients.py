@@ -157,3 +157,42 @@ def sarvam_tts(text, language_code, output_file_path):
     except Exception as e:
         print(f"Error calling Sarvam TTS: {e}")
         return False
+
+def get_gemini_response_stream(prompt_text, chat_history, language_code, kb_context=None):
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # Fetch relevant chunks semantically from Pinecone
+        relevant_context = query_pinecone(prompt_text)
+        
+        # Fall back to local kb_context (JSON) if Pinecone returns nothing
+        if not relevant_context and kb_context:
+            relevant_context = json.dumps(kb_context, indent=2, ensure_ascii=False)
+            
+        system_prompt = f"""You are a helpful multilingual voice assistant.
+Rules:
+1. Answer concisely and naturally for voice conversations.
+2. The user's detected language code is: {language_code}. You MUST respond in this language.
+3. If the user's question is related to the support guidelines or meeting notes, use the following retrieved context to answer:
+{relevant_context}
+If the question is unrelated to the context (e.g., general knowledge, small talk, or general advice), use your own knowledge to answer concisely and naturally. Do not refuse to answer general questions.
+"""
+        
+        # Convert our history format to Gemini's format
+        formatted_history = []
+        for msg in chat_history:
+            role = "model" if msg["role"] == "assistant" else "user"
+            formatted_history.append({"role": role, "parts": [msg["content"]]})
+            
+        chat = model.start_chat(history=formatted_history)
+        
+        # Combine system prompt with the actual user message
+        full_message = f"System Context:\n{system_prompt}\n\nUser Question:\n{prompt_text}"
+        
+        response = chat.send_message(full_message, stream=True)
+        for chunk in response:
+            yield chunk.text
+    except Exception as e:
+        print(f"Error calling Gemini stream: {e}")
+        yield "I am sorry, I am unable to answer right now."
+

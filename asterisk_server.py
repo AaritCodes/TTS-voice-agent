@@ -7,7 +7,7 @@ import uuid
 import tempfile
 import asyncio
 from dotenv import load_dotenv
-
+import re
 import random
 
 # Load environment variables (API keys)
@@ -18,7 +18,7 @@ try:
 except ImportError:
     audioop = None
 
-from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts
+from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts, get_gemini_response_stream
 
 setup_gemini()
 
@@ -100,13 +100,193 @@ def load_filler_audio():
             with wave.open(filler_path, "rb") as wf:
                 raw_16k = wf.readframes(wf.getnframes())
                 FILLER_AUDIO_8K = downsample_16k_to_8k(raw_16k)
-            print(f"✅  Loaded and prepared filler audio ({len(FILLER_AUDIO_8K)} bytes, ~{len(FILLER_AUDIO_8K)/16000:.2f}s)")
+            print(f"Loaded and prepared filler audio ({len(FILLER_AUDIO_8K)} bytes, ~{len(FILLER_AUDIO_8K)/16000:.2f}s)")
         except Exception as e:
-            print(f"⚠️  Error loading filler audio: {e}")
+            print(f"Error loading filler audio: {e}")
     else:
-        print(f"⚠️  {filler_path} not found. Filler pacing will be disabled.")
+        print(f"Filler audio file {filler_path} not found. Filler pacing will be disabled.")
 
-async def stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state):
+class PlaybackItem:
+    def __init__(self, sentence, out_path, task):
+        self.sentence = sentence
+        self.out_path = out_path
+        self.task = task
+
+async def monitor_barge_in(audio_queue, barge_in_event, hangup_event, silence_threshold, max_barge_in_chunks=3):
+    """
+    Background task that monitors incoming audio to detect caller interruption (barge-in).
+    """
+    consecutive_speech_chunks = 0
+    while True:
+        try:
+            packet = await audio_queue.get()
+            if packet is None:
+                break
+            kind, payload = packet
+            if kind == 0x00:
+                hangup_event.set()
+                barge_in_event.set()
+                break
+            elif kind == 0x10:
+                rms = get_rms(payload)
+                if rms > silence_threshold:
+                    consecutive_speech_chunks += 1
+                    if consecutive_speech_chunks >= max_barge_in_chunks:
+                        print(f"    [monitor_barge_in] Caller speech detected (RMS={rms}). Triggering barge-in!")
+                        barge_in_event.set()
+                else:
+                    consecutive_speech_chunks = max(0, consecutive_speech_chunks - 1)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"    [monitor_barge_in] Error: {e}")
+            break
+
+async def run_blocking_generator_in_thread(generator_func, *args, **kwargs):
+    """
+    Runs a blocking generator in a separate thread and pipes results to an async queue.
+    """
+    queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    
+    def run_generator():
+        try:
+            for item in generator_func(*args, **kwargs):
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+        except Exception as e:
+            loop.call_soon_threadsafe(queue.put_nowait, e)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+            
+    asyncio.create_task(asyncio.to_thread(run_generator))
+    return queue
+
+async def get_sentences_from_queue(chunk_queue):
+    """
+    Consumes raw LLM text chunks from a queue and yields complete sentences.
+    """
+    buffer = ""
+    sentence_end_re = re.compile(r'([^.!?\n।]+[.!?\n।]+)')
+    
+    while True:
+        chunk = await chunk_queue.get()
+        if chunk is None:
+            break
+        if isinstance(chunk, Exception):
+            print(f"    [get_sentences] Stream error: {chunk}")
+            break
+            
+        buffer += chunk
+        while True:
+            match = sentence_end_re.search(buffer)
+            if not match:
+                break
+            sentence = match.group(1).strip()
+            if sentence:
+                yield sentence
+            buffer = buffer[match.end():]
+            
+    remaining = buffer.strip()
+    if remaining:
+        yield remaining
+
+async def async_tts_task(sentence, lang_code, out_path, barge_in_event):
+    """
+    Asynchronously invokes Sarvam TTS for a single sentence.
+    """
+    if barge_in_event.is_set():
+        return False
+    try:
+        success = await asyncio.to_thread(sarvam_tts, sentence, lang_code, out_path)
+        return success
+    except Exception as e:
+        print(f"    [async_tts_task] Error: {e}")
+        return False
+
+async def run_playback_pipeline(chunk_queue, lang_code, writer, write_lock, is_streaming_state, barge_in_event, filler_task, session_id):
+    """
+    Pipelined execution: starts playing synthesized sentences in order as soon as they are ready.
+    """
+    playback_queue = asyncio.Queue()
+    
+    async def tts_scheduler():
+        sentence_idx = 0
+        async for sentence in get_sentences_from_queue(chunk_queue):
+            if barge_in_event.is_set():
+                break
+            out_file = os.path.join(tempfile.gettempdir(), f"reply_{session_id}_{sentence_idx}.wav")
+            task = asyncio.create_task(async_tts_task(sentence, lang_code, out_file, barge_in_event))
+            await playback_queue.put(PlaybackItem(sentence, out_file, task))
+            sentence_idx += 1
+        await playback_queue.put(None)
+        
+    scheduler_task = asyncio.create_task(tts_scheduler())
+    complete_response_sentences = []
+    
+    try:
+        while True:
+            if barge_in_event.is_set():
+                break
+                
+            item = await playback_queue.get()
+            if item is None:
+                break
+                
+            success = await item.task
+            
+            if barge_in_event.is_set():
+                if os.path.exists(item.out_path):
+                    try: os.remove(item.out_path)
+                    except Exception: pass
+                continue
+                
+            if success and os.path.exists(item.out_path):
+                complete_response_sentences.append(item.sentence)
+                
+                # Cancel filler task immediately
+                if filler_task and not filler_task.done():
+                    filler_task.cancel()
+                    try:
+                        await filler_task
+                    except asyncio.CancelledError:
+                        pass
+                    filler_task = None
+                    
+                try:
+                    def read_and_downsample():
+                        with wave.open(item.out_path, "rb") as wf:
+                            raw_16k = wf.readframes(wf.getnframes())
+                            return downsample_16k_to_8k(raw_16k)
+                            
+                    raw_8k = await asyncio.to_thread(read_and_downsample)
+                    await stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state, barge_in_event)
+                finally:
+                    if os.path.exists(item.out_path):
+                        try: os.remove(item.out_path)
+                        except Exception: pass
+            else:
+                print(f"    [run_playback_pipeline] Skipping failed sentence: {item.sentence}")
+    finally:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except Exception:
+            pass
+            
+        while not playback_queue.empty():
+            try:
+                item = playback_queue.get_nowait()
+                if item and item.task:
+                    item.task.cancel()
+                    if os.path.exists(item.out_path):
+                        try: os.remove(item.out_path)
+                        except Exception: pass
+            except asyncio.QueueEmpty:
+                break
+                
+        return " ".join(complete_response_sentences)
+
+async def stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state, barge_in_event=None):
     """
     Streams raw 8kHz 16-bit signed PCM audio bytes over the AudioSocket.
     Enforces drift-free clock-aligned pacing.
@@ -115,9 +295,12 @@ async def stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state):
     try:
         start_time = asyncio.get_event_loop().time()
         chunk_duration = 0.02  # 20ms of audio per 320-byte chunk
-        total_chunks = len(raw_8k) // 320
         
         for idx, i in enumerate(range(0, len(raw_8k), 320)):
+            if barge_in_event and barge_in_event.is_set():
+                print("    [stream_audio_bytes] Interrupted by barge-in event.")
+                break
+                
             chunk = raw_8k[i:i+320]
             if len(chunk) < 320:
                 chunk = chunk + b"\x00" * (320 - len(chunk))
@@ -145,64 +328,6 @@ async def stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state):
     finally:
         is_streaming_state[0] = False
 
-async def run_voice_pipeline(audio_frames, chat_history, lang_code, out_path, wav_path):
-    """
-    Runs the STT, LLM (Gemini), and TTS (Sarvam) pipeline concurrently.
-    """
-    try:
-        print(f"    [DEBUG Server] Saving recording: {wav_path} ({len(audio_frames)} bytes)")
-        # 1. Save to unique WAV (8kHz, 16-bit, Mono) inside an executor thread
-        def save_wav():
-            with wave.open(wav_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(8000)
-                wf.writeframes(audio_frames)
-                
-        await asyncio.to_thread(save_wav)
-        print(f"    [DEBUG Server] Saved recording successfully.")
-        
-        # 2. STT via Sarvam
-        print(f"    [DEBUG Server] Invoking Sarvam STT on {wav_path}...")
-        transcript, detected_lang = await asyncio.to_thread(sarvam_stt, wav_path)
-        if not transcript:
-            print(f"    [DEBUG Server] No speech transcript detected. Aborting pipeline.")
-            return None, detected_lang
-            
-        print("─" * 50)
-        print(f"📝  User: {transcript}")
-        print(f"    [DEBUG Server] Detected Language: '{detected_lang}'")
-        
-        # 3. LLM via Gemini
-        print(f"    [DEBUG Server] Calling Gemini with history length: {len(chat_history)}...")
-        answer = await asyncio.to_thread(get_gemini_response, transcript, chat_history, detected_lang)
-        print(f"🤖  AI:   {answer}")
-        print("─" * 50)
-        
-        # Save to history
-        chat_history.append({"role": "user", "content": transcript})
-        chat_history.append({"role": "assistant", "content": answer})
-        print(f"    [DEBUG Server] History updated. Size: {len(chat_history)}")
-        
-        # 4. TTS via Sarvam
-        print(f"    [DEBUG Server] Invoking Sarvam TTS for text: '{answer}'")
-        tts_success = await asyncio.to_thread(sarvam_tts, answer, detected_lang, out_path)
-        if tts_success:
-            print(f"    [DEBUG Server] Sarvam TTS saved speech to {out_path}")
-            return out_path, detected_lang
-        else:
-            print(f"    [ERROR Server] Sarvam TTS generation failed.")
-    except Exception as e:
-        print(f"    [ERROR Server] Exception in run_voice_pipeline: {e}")
-    finally:
-        if os.path.exists(wav_path):
-            try:
-                os.remove(wav_path)
-                print(f"    [DEBUG Server] Cleaned up temporary WAV file: {wav_path}")
-            except Exception:
-                pass
-    return None, lang_code
-
 async def process_call_async(reader, writer):
     """
     Asynchronous connection handler for Asterisk AudioSocket connections.
@@ -210,13 +335,12 @@ async def process_call_async(reader, writer):
     """
     addr = writer.get_extra_info('peername')
     print(f"==========================================")
-    print(f"📞  Asterisk AudioSocket Connected (Async): {addr}")
+    print(f"[Connect] Asterisk AudioSocket Connected (Async): {addr}")
     print(f"==========================================")
     
     # Generate unique paths for session WAV files to prevent data collisions/overwrites
     session_id = str(uuid.uuid4())
     wav_path = os.path.join(tempfile.gettempdir(), f"incoming_{session_id}.wav")
-    out_path = os.path.join(tempfile.gettempdir(), f"outgoing_{session_id}.wav")
     chat_history = []
     lang_code = "en-IN"
     write_lock = asyncio.Lock()
@@ -260,7 +384,7 @@ async def process_call_async(reader, writer):
                 pass
             except Exception as e:
                 print(f"    [keep_alive] Exception: {e}")
-
+ 
         keep_alive_task = asyncio.create_task(keep_alive())
         
         # Continuous background reader task to drain Asterisk's TCP stream.
@@ -299,13 +423,13 @@ async def process_call_async(reader, writer):
             except Exception as e:
                 print(f"    [socket_reader] Exception: {e}")
                 await audio_queue.put(None)
-
+ 
         reader_task = asyncio.create_task(socket_reader())
         
         SILENCE_THRESHOLD_RMS = 500  # Minimum energy to count as speech (aligned with backup branch)
         MAX_SILENCE_CHUNKS = 75      # 75 chunks of 20ms = 1.5 seconds of silence
         
-        print("\n🎧  Listening for audio...")
+        print("\n[Listening] Listening for audio...")
         
         while True:
             packet = await audio_queue.get()
@@ -315,7 +439,7 @@ async def process_call_async(reader, writer):
             kind, payload = packet
             
             if kind == 0x00:
-                print("\n❌  Call hung up by Asterisk.")
+                print("\n[Hangup] Call hung up by Asterisk.")
                 break
                 
             elif kind == 0x10:
@@ -328,7 +452,7 @@ async def process_call_async(reader, writer):
                 
                 if rms > SILENCE_THRESHOLD_RMS:
                     if not is_recording:
-                        print(f"\n🗣️  Speech detected! (RMS={rms}) Recording...")
+                        print(f"\n[Speech] Speech detected! (RMS={rms}) Recording...")
                     is_recording = True
                     silence_frames = 0
                 else:
@@ -348,51 +472,95 @@ async def process_call_async(reader, writer):
                     is_recording = False
                     silence_frames = 0
                     
-                    # Concurrently launch the voice pipeline task
-                    pipeline_task = asyncio.create_task(
-                        run_voice_pipeline(recorded_frames, chat_history, lang_code, out_path, wav_path)
+                    # 1. Start the monitor_barge_in background task
+                    barge_in_event = asyncio.Event()
+                    hangup_event = asyncio.Event()
+                    monitor_task = asyncio.create_task(
+                        monitor_barge_in(audio_queue, barge_in_event, hangup_event, SILENCE_THRESHOLD_RMS)
                     )
                     
-                    # Concurrently stream the filler audio if loaded
-                    if FILLER_AUDIO_8K:
-                        print("    [Filler] Streaming filler audio concurrently...")
-                        await stream_audio_bytes(FILLER_AUDIO_8K, writer, write_lock, is_streaming_state)
+                    try:
+                        # 2. Save the recording to WAV
+                        def save_wav():
+                            with wave.open(wav_path, "wb") as wf:
+                                wf.setnchannels(1)
+                                wf.setsampwidth(2)
+                                wf.setframerate(8000)
+                                wf.writeframes(recorded_frames)
+                        await asyncio.to_thread(save_wav)
                         
-                    # Now await the voice pipeline task to finish
-                    pipeline_result_path, lang_code = await pipeline_task
-                    
-                    if pipeline_result_path and os.path.exists(pipeline_result_path):
-                        print("    Streaming AI response back to the phone call...")
-                        try:
-                            def read_and_downsample():
-                                with wave.open(pipeline_result_path, "rb") as wf:
-                                    raw_16k = wf.readframes(wf.getnframes())
-                                    return downsample_16k_to_8k(raw_16k)
-                                    
-                            raw_8k = await asyncio.to_thread(read_and_downsample)
-                            await stream_audio_bytes(raw_8k, writer, write_lock, is_streaming_state)
-                        finally:
-                            if os.path.exists(pipeline_result_path):
-                                try:
-                                    os.remove(pipeline_result_path)
-                                except Exception:
-                                    pass
-                    
-                    # Reset for the next sentence
-                    # Flush any stale audio frames that buffered in the queue while we were thinking/speaking
-                    while not audio_queue.empty():
-                        try:
-                            audio_queue.get_nowait()
-                        except asyncio.QueueEmpty:
+                        # 3. STT via Sarvam
+                        print(f"    [DEBUG Server] Invoking Sarvam STT on {wav_path}...")
+                        transcript, detected_lang = await asyncio.to_thread(sarvam_stt, wav_path)
+                        
+                        if os.path.exists(wav_path):
+                            try: os.remove(wav_path)
+                            except Exception: pass
+                            
+                        # If STT failed or is empty, skip
+                        if not transcript or barge_in_event.is_set():
+                            print(f"    [DEBUG Server] STT empty or interrupted. Skipping response.")
+                            continue
+                            
+                        print("-" * 50)
+                        print(f"User: {transcript}")
+                        print(f"    [DEBUG Server] Detected Language: '{detected_lang}'")
+                        
+                        chat_history.append({"role": "user", "content": transcript})
+                        
+                        # 4. Start streaming LLM response
+                        chunk_queue = await run_blocking_generator_in_thread(
+                            get_gemini_response_stream, transcript, chat_history, detected_lang
+                        )
+                        
+                        # 5. Start filler audio concurrently
+                        filler_task = None
+                        if FILLER_AUDIO_8K:
+                            print("    [Filler] Streaming filler audio concurrently...")
+                            filler_task = asyncio.create_task(
+                                stream_audio_bytes(FILLER_AUDIO_8K, writer, write_lock, is_streaming_state, barge_in_event)
+                            )
+                            
+                        # 6. Run playback loop (sentence-by-sentence TTS + play)
+                        ai_response = await run_playback_pipeline(
+                            chunk_queue, detected_lang, writer, write_lock, is_streaming_state, barge_in_event, filler_task, session_id
+                        )
+                        
+                        # Cancel filler if still running
+                        if filler_task and not filler_task.done():
+                            filler_task.cancel()
+                            try: await filler_task
+                            except asyncio.CancelledError: pass
+                            
+                        print(f"AI: {ai_response}")
+                        print("-" * 50)
+                        
+                        if ai_response:
+                            chat_history.append({"role": "assistant", "content": ai_response})
+                            
+                    finally:
+                        # Stop the monitor task
+                        monitor_task.cancel()
+                        try: await monitor_task
+                        except asyncio.CancelledError: pass
+                        
+                        # Flush any stale packets that accumulated in the queue
+                        while not audio_queue.empty():
+                            try: audio_queue.get_nowait()
+                            except asyncio.QueueEmpty: break
+                            
+                        # If the call hung up during thinking/playback, exit the loop
+                        if hangup_event.is_set():
+                            print("\n[Hangup] Call hung up by Asterisk during playback/thinking.")
                             break
                             
-                    print("\n🎧  Listening for audio...")
-                    frames.clear()
-                    is_recording = False
-                    silence_frames = 0
+                        print("\n[Listening] Listening for audio...")
+                        frames.clear()
+                        is_recording = False
+                        silence_frames = 0
                     
             elif kind == 0xff:
-                print(f"\n❌  Asterisk Error Code: {payload}")
+                print(f"\n[Error] Asterisk Error Code: {payload}")
                 break
     except Exception as e:
         print(f"    [ERROR] Exception in call processing: {e}")
@@ -411,7 +579,7 @@ async def process_call_async(reader, writer):
             await writer.wait_closed()
         except Exception:
             pass
-        print(f"🔌  Connection closed for {addr}")
+        print(f"[Disconnect] Connection closed for {addr}")
 
 async def main():
     print(f"Starting Asterisk AudioSocket Server (Asyncio) on {HOST}:{PORT}")
