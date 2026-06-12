@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  ai-backend:
+    build: .
+    container_name: stl_ai_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./knowledge_base.json:/app/knowledge_base.json
+      - ./filler.wav:/app/filler.wav
+
+  asterisk:
+    image: andrius/asterisk:alpine
+    container_name: stl_asterisk
+    restart: unless-stopped
+    # Use host networking for Asterisk to easily manage the massive 10000-20000 UDP port range
+    network_mode: "host"
+    volumes:
+      - ./asterisk_configs:/etc/asterisk
+    depends_on:
+      - ai-backend
