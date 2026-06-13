@@ -367,10 +367,8 @@ async def process_call_async(reader, writer):
         
         # Background keep-alive task to prevent Asterisk 2-second AudioSocket inactivity timeout (app_audiosocket.c)
         async def keep_alive():
-            # Generate pure silence packets (all 0x00) to keep AudioSocket alive
-            # while ensuring absolute zero background noise (crystal-clear audio) for the caller.
-            comfort_payload = b"\x00" * 320
-            comfort_packet = struct.pack(">BH", 0x10, 320) + comfort_payload
+            # Generate extremely low-amplitude white noise (RMS ~115) to keep the NeoX PBX VAD alive.
+            # We use white noise instead of a 200Hz hum because telecom gateways physically filter out all frequencies below 300Hz!
             
             try:
                 while True:
@@ -379,6 +377,8 @@ async def process_call_async(reader, writer):
                     
                     async with write_lock:
                         if not is_streaming_state[0]:
+                            samples = [random.randint(-200, 200) for _ in range(160)]
+                            comfort_packet = struct.pack(">BH", 0x10, 320) + struct.pack("<160h", *samples)
                             writer.write(comfort_packet)
                             await writer.drain()
                     await asyncio.sleep(0.02) # standard RTP keep-alive every 20ms (50 packets/sec)
