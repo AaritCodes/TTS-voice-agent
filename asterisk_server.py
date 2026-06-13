@@ -6,6 +6,7 @@ import os
 import uuid
 import tempfile
 import asyncio
+import time
 from dotenv import load_dotenv
 import re
 import random
@@ -18,7 +19,7 @@ try:
 except ImportError:
     audioop = None
 
-from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts, get_gemini_response_stream
+from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts, get_gemini_response_stream, insert_call_log
 
 setup_gemini()
 
@@ -344,6 +345,7 @@ async def process_call_async(reader, writer):
     chat_history = []
     lang_code = "en-IN"
     write_lock = asyncio.Lock()
+    call_start_time = time.time()
     
     try:
         # Read the initial UUID packet (type 0x01)
@@ -580,6 +582,20 @@ async def process_call_async(reader, writer):
         except Exception:
             pass
         print(f"[Disconnect] Connection closed for {addr}")
+
+        try:
+            call_duration_seconds = int(time.time() - call_start_time)
+            log_data = {
+                "session_id": session_id,
+                "caller_ip": str(addr) if addr else None,
+                "call_duration_seconds": call_duration_seconds,
+                "language_code": lang_code,
+                "chat_history": chat_history
+            }
+            # Fire and forget call logging
+            asyncio.create_task(asyncio.to_thread(insert_call_log, log_data))
+        except Exception as e:
+            print(f"    [ERROR] Failed to save call log: {e}")
 
 async def main():
     print(f"Starting Asterisk AudioSocket Server (Asyncio) on {HOST}:{PORT}")

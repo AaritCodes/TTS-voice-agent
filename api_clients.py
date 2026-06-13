@@ -196,3 +196,27 @@ If the question is unrelated to the context (e.g., general knowledge, small talk
         print(f"Error calling Gemini stream: {e}")
         yield "I am sorry, I am unable to answer right now."
 
+_supabase_client = None
+
+def get_supabase_client():
+    global _supabase_client
+    if _supabase_client is None:
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        if url and key:
+            try:
+                from supabase import create_client
+                _supabase_client = create_client(url, key)
+            except ImportError:
+                print("Supabase package not installed.")
+    return _supabase_client
+
+def insert_call_log(data):
+    try:
+        client = get_supabase_client()
+        if client:
+            client.table("call_logs").insert(data).execute()
+        else:
+            print("Supabase client not initialized. Call log not saved.")
+    except Exception as e:
+        print(f"Error inserting into Supabase: {e}")

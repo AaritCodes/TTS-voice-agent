@@ -11,4 +11,5 @@ python-multipart
 psutil
 pedalboard
 pinecone
-pypdf
+pypdf
+supabase
