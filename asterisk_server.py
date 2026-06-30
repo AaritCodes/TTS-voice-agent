@@ -19,7 +19,7 @@ try:
 except ImportError:
     audioop = None
 
-from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts, get_gemini_response_stream, insert_call_log
+from api_clients import setup_gemini, get_gemini_response, sarvam_stt, sarvam_tts, get_gemini_response_stream, insert_call_log, generate_call_summary
 
 setup_gemini()
 
@@ -585,12 +585,25 @@ async def process_call_async(reader, writer):
 
         try:
             call_duration_seconds = int(time.time() - call_start_time)
+            
+            # --- EXTRACT TRANSCRIPT AND SUMMARIZE USING NVIDIA ---
+            transcript_list = []
+            for msg in chat_history:
+                prefix = "User: " if msg["role"] == "user" else "AI: "
+                transcript_list.append(prefix + msg["content"])
+                
+            ai_summary = None
+            if transcript_list:
+                ai_summary = await asyncio.to_thread(generate_call_summary, transcript_list)
+            # -----------------------------------------------------
+
             log_data = {
                 "session_id": session_id,
                 "caller_ip": str(addr) if addr else None,
                 "call_duration_seconds": call_duration_seconds,
                 "language_code": lang_code,
-                "chat_history": chat_history
+                "chat_history": chat_history,
+                "ai_summary": ai_summary
             }
             # Fire and forget call logging
             asyncio.create_task(asyncio.to_thread(insert_call_log, log_data))
